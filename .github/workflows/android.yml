@@ -61,6 +61,8 @@ jobs:
           cp android/app/build/outputs/apk/release/app-release.apk chromehisto.apk
           sha256sum chromehisto.apk > chromehisto.apk.sha256
           cat chromehisto.apk.sha256
+          # Same APK inside a zip: phone browsers do not hold .zip downloads for APK scanning.
+          zip -j chromehisto-apk.zip chromehisto.apk chromehisto.apk.sha256
 
       - uses: actions/upload-artifact@v4
         with:
@@ -68,6 +70,7 @@ jobs:
           path: |
             chromehisto.apk
             chromehisto.apk.sha256
+            chromehisto-apk.zip
 
       - name: Publish to the "android-latest" release
         if: github.ref_name == github.event.repository.default_branch
@@ -75,10 +78,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete android-latest --yes --cleanup-tag || true
-          gh release create android-latest chromehisto.apk chromehisto.apk.sha256 \
+          gh release create android-latest chromehisto.apk chromehisto.apk.sha256 chromehisto-apk.zip \
             --target "$GITHUB_SHA" \
             --title "Chrome History Export – Android (latest build)" \
             --notes "Built automatically from ${GITHUB_SHA::7} (run #${GITHUB_RUN_NUMBER}).
 
           Download **chromehisto.apk**, open it on your phone and allow installing from this source.
+          If the download stalls at 99 %, use **chromehisto-apk.zip** instead, extract it in the Files app and tap the APK.
           SHA-256: \`$(cut -d' ' -f1 chromehisto.apk.sha256)\`"
