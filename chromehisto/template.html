@@ -1,0 +1,680 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="chromehisto">
+<meta name="report-data-sha256" content="__DATA_SHA256__">
+<title>Chrome History Report</title>
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --ink: #1b1f24; --muted: #5d6673;
+  --line: #dde1e6; --accent: #1a5fd0; --accent-ink: #ffffff;
+  --link: #1a56c4; --visited: #6b3fb5; --chip: #eef1f5; --warn: #9a5b00;
+  --warn-bg: #fff4dd; --ok: #1d7a3e; --bad: #b3261e; --code: #f0f2f5;
+  --mono: ui-monospace, "Cascadia Mono", Consolas, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111418; --panel: #1a1e24; --ink: #e6e9ee; --muted: #9aa4b2;
+    --line: #2c323b; --accent: #4c8dff; --accent-ink: #0b0d10;
+    --link: #7fb0ff; --visited: #c1a2ff; --chip: #252b33; --warn: #f0b34a;
+    --warn-bg: #2d2416; --ok: #5bc785; --bad: #ff7b72; --code: #20252c;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+header { padding: 18px 16px 8px; max-width: 1280px; margin: 0 auto; }
+h1 { font-size: 20px; margin: 0 0 6px; }
+h2 { font-size: 16px; margin: 18px 0 8px; }
+h3 { font-size: 14px; margin: 14px 0 6px; color: var(--muted); }
+main { max-width: 1280px; margin: 0 auto; padding: 0 16px 48px; }
+.sub { color: var(--muted); font-size: 13px; }
+.mono { font-family: var(--mono); font-size: 12.5px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.chip { background: var(--chip); border-radius: 999px; padding: 2px 9px;
+  font-size: 12px; color: var(--muted); white-space: nowrap; }
+.chip b { color: var(--ink); font-weight: 600; }
+nav.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line);
+  margin: 10px 0 14px; overflow-x: auto; }
+nav.tabs button { background: none; border: 0; border-bottom: 2px solid transparent;
+  padding: 8px 12px; color: var(--muted); font: inherit; cursor: pointer; white-space: nowrap; }
+nav.tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+section[hidden] { display: none; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+.controls { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+.controls label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+.controls .wide { grid-column: 1 / -1; }
+input[type=text], input[type=search], input[type=date], select, textarea {
+  font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 6px; padding: 6px 8px; width: 100%; }
+textarea { min-height: 70px; resize: vertical; }
+.checks { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 8px; font-size: 13px; }
+.checks label { display: flex; gap: 6px; align-items: center; }
+button.btn { font: inherit; font-size: 13px; padding: 5px 10px; border-radius: 6px;
+  border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
+button.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button.btn:disabled { opacity: .5; cursor: default; }
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; }
+.bar .grow { flex: 1; }
+.list { display: flex; flex-direction: column; gap: 8px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; min-width: 0; }
+.card .when { font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+.card .title { font-size: 15px; font-weight: 600; margin: 4px 0 2px; overflow-wrap: anywhere; }
+.card a { color: var(--link); text-decoration: none; }
+.card a:hover { text-decoration: underline; }
+.card a:visited { color: var(--visited); }
+.card .url { font-family: var(--mono); font-size: 12.5px; overflow-wrap: anywhere; word-break: break-all; }
+.card .url.dead { color: var(--muted); }
+.card .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; }
+.badge { font-size: 11px; padding: 1px 7px; border-radius: 4px; background: var(--chip); color: var(--ink); font-weight: 600; letter-spacing: .02em; }
+.badge.typed { background: #1d7a3e22; color: var(--ok); }
+.badge.sync { background: #9a5b0022; color: var(--warn); }
+.opened { font-size: 12px; color: var(--ok); }
+.details { margin-top: 10px; border-top: 1px dashed var(--line); padding-top: 8px; }
+table.kv { border-collapse: collapse; width: 100%; table-layout: fixed; font-size: 12.5px; }
+table.kv td { border-top: 1px solid var(--line); padding: 4px 6px; vertical-align: top; overflow-wrap: anywhere; }
+table.kv td:first-child { width: 34%; color: var(--muted); font-family: var(--mono); font-size: 12px; }
+table.kv td.v { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; }
+table.grid { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+table.grid th, table.grid td { border-bottom: 1px solid var(--line); padding: 5px 6px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+table.grid th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--panel); }
+.scroll { overflow-x: auto; }
+.note { background: var(--warn-bg); border-left: 3px solid var(--warn); padding: 8px 10px; border-radius: 6px; font-size: 13px; margin: 8px 0; }
+.notes { margin-top: 6px; font-size: 13px; }
+.notes .n { border-left: 3px solid var(--accent); padding: 2px 8px; margin: 4px 0; }
+.notes .hist { color: var(--muted); font-size: 12px; }
+.ok { color: var(--ok); font-weight: 600; }
+.bad { color: var(--bad); font-weight: 600; }
+.pager { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: center; margin: 14px 0; }
+.toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--bg);
+  padding: 8px 14px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: calc(100% - 32px); }
+.toast.show { opacity: .95; }
+ul.tight { margin: 6px 0; padding-left: 20px; }
+ul.tight li { margin: 3px 0; }
+@media (max-width: 600px) {
+  table.kv td:first-child { width: 42%; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>Chrome History Report</h1>
+  <div class="sub" id="hdr-sub"></div>
+  <div class="chips" id="hdr-chips"></div>
+</header>
+<main>
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="history" aria-selected="true">History</button>
+    <button role="tab" data-tab="downloads" aria-selected="false">Downloads</button>
+    <button role="tab" data-tab="evidence" aria-selected="false">Evidence &amp; provenance</button>
+    <button role="tab" data-tab="log" aria-selected="false">Click &amp; note log</button>
+    <button role="tab" data-tab="about" aria-selected="false">What is recorded</button>
+  </nav>
+
+  <section id="tab-history">
+    <div class="panel">
+      <div class="controls">
+        <label class="wide">Search title, URL or any metadata
+          <input type="search" id="q" placeholder="e.g. paypal.com  ·  password-recovery  ·  RELOAD"></label>
+        <label>From (local date)<input type="date" id="from"></label>
+        <label>To (local date)<input type="date" id="to"></label>
+        <label>Source<select id="src"></select></label>
+        <label>Transition<select id="trans"></select></label>
+        <label>Origin<select id="origin"></select></label>
+        <label>Sort<select id="sort">
+          <option value="desc">Newest first</option><option value="asc">Oldest first</option>
+          <option value="host">Domain A→Z</option><option value="visits">Most visited URL</option>
+        </select></label>
+        <label>Per page<select id="per">
+          <option>50</option><option selected>100</option><option>250</option><option>1000</option>
+        </select></label>
+        <label>Examiner name (stamped on clicks &amp; notes)
+          <input type="text" id="examiner" placeholder="Your name"></label>
+      </div>
+      <div class="checks">
+        <label><input type="checkbox" id="opt-geo"> Record GPS/geolocation when I open a link (browser will ask)</label>
+        <label><input type="checkbox" id="opt-ip"> Record public IP when I open a link (contacts api.ipify.org)</label>
+        <label><input type="checkbox" id="opt-raw"> Expand all details</label>
+      </div>
+    </div>
+    <div class="bar"><span id="count" class="sub grow"></span>
+      <button class="btn" id="export-csv">Export filtered as CSV</button></div>
+    <div class="list" id="list"></div>
+    <div class="pager" id="pager"></div>
+  </section>
+
+  <section id="tab-downloads" hidden>
+    <div class="bar"><input type="search" id="dq" placeholder="Filter downloads" style="max-width:420px"><span id="dcount" class="sub"></span></div>
+    <div class="list" id="dlist"></div>
+  </section>
+
+  <section id="tab-evidence" hidden>
+    <div class="panel">
+      <h2 style="margin-top:0">Report integrity</h2>
+      <div id="integrity"></div>
+      <div class="bar"><button class="btn primary" id="verify-data">Verify embedded data hash</button><span id="verify-out"></span></div>
+    </div>
+    <h2>Export context (machine &amp; moment this report was produced)</h2>
+    <div class="panel" id="ctx"></div>
+    <h2>Evidence sources</h2>
+    <div id="sources"></div>
+  </section>
+
+  <section id="tab-log" hidden>
+    <div class="note">Every link you open from this report and every note you write is appended to a
+      hash-chained log (SHA-256, each record includes the previous record's hash). Changing or deleting any
+      record breaks the chain, which <b>Verify chain</b> detects. The log is stored in this browser
+      (localStorage) — export it to keep it.</div>
+    <div class="bar">
+      <button class="btn primary" id="log-verify">Verify chain</button>
+      <button class="btn" id="log-export">Export log (JSON)</button>
+      <button class="btn" id="log-clear">Clear log…</button>
+      <span id="log-status"></span>
+    </div>
+    <div class="scroll panel"><table class="grid" id="log-table"></table></div>
+  </section>
+
+  <section id="tab-about" hidden>
+    <div class="panel" id="about"></div>
+  </section>
+</main>
+<div class="toast" id="toast"></div>
+
+<script type="application/json" id="report-data">__DATA_JSON__</script>
+<script>
+"use strict";
+(function () {
+const RAW = document.getElementById("report-data").textContent;
+const DATA = JSON.parse(RAW);
+const DATA_SHA = document.querySelector('meta[name="report-data-sha256"]').content;
+const LOG_KEY = "chromehisto-log-" + DATA_SHA.slice(0, 16);
+const PREF_KEY = "chromehisto-prefs";
+const E = DATA.entries;
+const $ = (id) => document.getElementById(id);
+
+// ---------------------------------------------------------------- utils
+function el(tag, attrs, ...kids) {
+  const n = document.createElement(tag);
+  if (attrs) for (const [k, v] of Object.entries(attrs)) {
+    if (v == null || v === false) continue;
+    if (k === "class") n.className = v;
+    else if (k === "text") n.textContent = v;
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else n.setAttribute(k, v === true ? "" : v);
+  }
+  for (const k of kids.flat()) if (k != null) n.append(k instanceof Node ? k : String(k));
+  return n;
+}
+const SAFE_PROTOCOLS = new Set(["http:", "https:", "ftp:", "file:"]);
+function safeHref(u) {
+  try { const p = new URL(u); return SAFE_PROTOCOLS.has(p.protocol) ? p.href : null; }
+  catch (_) { return null; }
+}
+function fmtLocal(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (isNaN(d)) return iso;
+  return d.toLocaleString(undefined, { weekday: "short", year: "numeric", month: "2-digit",
+    day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+function fmtBytes(n) {
+  if (n == null || isNaN(n)) return "—";
+  const u = ["B", "KB", "MB", "GB", "TB"]; let i = 0; n = Number(n);
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return n.toFixed(i ? 1 : 0) + " " + u[i];
+}
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove("show"), 2200);
+}
+function store(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); return true; } catch (_) { return false; } }
+function load(key, dflt) { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : dflt; } catch (_) { return dflt; } }
+function download(name, text, type) {
+  const a = el("a", { href: URL.createObjectURL(new Blob([text], { type })), download: name });
+  document.body.append(a); a.click(); a.remove();
+}
+function copy(text) {
+  (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject())
+    .then(() => toast("Copied"), () => { prompt("Copy:", text); });
+}
+
+// Renders any value: objects as nested key/value tables, [[k,v],..] as tables.
+function kvTable(obj) {
+  const t = el("table", { class: "kv" });
+  const entries = Array.isArray(obj) && obj.every((p) => Array.isArray(p) && p.length === 2)
+    ? obj : Object.entries(obj || {});
+  for (const [k, v] of entries) {
+    let cell;
+    if (v && typeof v === "object" && !Array.isArray(v)) cell = el("td", null, kvTable(v));
+    else if (Array.isArray(v) && v.length && v.every((p) => Array.isArray(p) && p.length === 2)) cell = el("td", null, kvTable(v));
+    else if (Array.isArray(v)) cell = el("td", { class: "v", text: v.length ? v.map(String).join("\n") : "[]" });
+    else cell = el("td", { class: "v", text: v === null ? "null" : String(v) });
+    t.append(el("tr", null, el("td", { text: k }), cell));
+  }
+  return t;
+}
+
+// ---------------------------------------------------------------- SHA-256
+// Pure-JS fallback for pages where crypto.subtle is unavailable.
+function sha256js(str) {
+  const bytes = new TextEncoder().encode(str);
+  const K = [0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+    0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+    0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+    0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+    0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+    0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+    0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+    0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+  const H = [0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+  const l = bytes.length, nb = ((l + 9 + 63) >> 6) << 6;
+  const m = new Uint8Array(nb); m.set(bytes); m[l] = 0x80;
+  const dv = new DataView(m.buffer);
+  dv.setUint32(nb - 4, (l * 8) >>> 0); dv.setUint32(nb - 8, Math.floor(l / 0x20000000));
+  const w = new Uint32Array(64), r = (x, n) => (x >>> n) | (x << (32 - n));
+  for (let o = 0; o < nb; o += 64) {
+    for (let i = 0; i < 16; i++) w[i] = dv.getUint32(o + i * 4);
+    for (let i = 16; i < 64; i++) {
+      const s0 = r(w[i-15],7) ^ r(w[i-15],18) ^ (w[i-15] >>> 3);
+      const s1 = r(w[i-2],17) ^ r(w[i-2],19) ^ (w[i-2] >>> 10);
+      w[i] = (w[i-16] + s0 + w[i-7] + s1) >>> 0;
+    }
+    let [a,b,c,d,e,f,g,h] = H;
+    for (let i = 0; i < 64; i++) {
+      const t1 = (h + (r(e,6) ^ r(e,11) ^ r(e,25)) + ((e & f) ^ (~e & g)) + K[i] + w[i]) >>> 0;
+      const t2 = ((r(a,2) ^ r(a,13) ^ r(a,22)) + ((a & b) ^ (a & c) ^ (b & c))) >>> 0;
+      h = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = b; b = a; a = (t1 + t2) >>> 0;
+    }
+    H[0]=(H[0]+a)>>>0; H[1]=(H[1]+b)>>>0; H[2]=(H[2]+c)>>>0; H[3]=(H[3]+d)>>>0;
+    H[4]=(H[4]+e)>>>0; H[5]=(H[5]+f)>>>0; H[6]=(H[6]+g)>>>0; H[7]=(H[7]+h)>>>0;
+  }
+  return H.map((x) => x.toString(16).padStart(8, "0")).join("");
+}
+async function sha256(str) {
+  if (window.crypto && crypto.subtle) {
+    try {
+      const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+      return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+    } catch (_) { /* fall through */ }
+  }
+  return sha256js(str);
+}
+
+// ---------------------------------------------------------------- log
+let LOG = load(LOG_KEY, []);
+let queue = Promise.resolve();
+function nowStamp() {
+  const d = new Date();
+  return { at_utc: d.toISOString(), at_local: d.toString(),
+    tz: Intl.DateTimeFormat().resolvedOptions().timeZone, utc_offset_min: -d.getTimezoneOffset() };
+}
+function examiner() { return $("examiner").value.trim() || "(not entered)"; }
+function appendLog(rec) {
+  queue = queue.then(async () => {
+    const prev = LOG.length ? LOG[LOG.length - 1].hash : "GENESIS:" + DATA_SHA;
+    const full = Object.assign({ seq: LOG.length + 1 }, rec, { prev_hash: prev });
+    full.hash = await sha256(prev + JSON.stringify(full));
+    LOG.push(full);
+    if (!store(LOG_KEY, LOG)) toast("Warning: browser storage unavailable — export the log before closing");
+    onLogChanged();
+    return full;
+  });
+  return queue;
+}
+async function verifyChain() {
+  let prev = "GENESIS:" + DATA_SHA;
+  for (const rec of LOG) {
+    const copyRec = Object.assign({}, rec); delete copyRec.hash;
+    if (copyRec.prev_hash !== prev) return { ok: false, at: rec.seq, why: "prev_hash does not match previous record" };
+    const h = await sha256(prev + JSON.stringify(copyRec));
+    if (h !== rec.hash) return { ok: false, at: rec.seq, why: "record content was altered" };
+    prev = rec.hash;
+  }
+  return { ok: true, n: LOG.length };
+}
+function environmentNow() {
+  const c = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  return {
+    online: navigator.onLine,
+    connection: c ? { type: c.type ?? "(not exposed)", effectiveType: c.effectiveType, downlink_mbps: c.downlink,
+      downlinkMax_mbps: c.downlinkMax ?? "(not exposed)", rtt_ms: c.rtt, saveData: c.saveData } : "(Network Information API not available)",
+    wifi_rssi: "(not exposed to web pages by any browser)",
+    user_agent: navigator.userAgent, platform: navigator.platform, languages: navigator.languages,
+    hardware_concurrency: navigator.hardwareConcurrency, device_memory_gb: navigator.deviceMemory,
+    screen: screen.width + "x" + screen.height + " @" + devicePixelRatio + "x",
+    viewport: innerWidth + "x" + innerHeight,
+    page: location.href.split("#")[0],
+  };
+}
+async function supplement(seq) {
+  const extra = {};
+  const jobs = [];
+  if (navigator.getBattery) jobs.push(navigator.getBattery().then((b) => {
+    extra.battery = { level_percent: Math.round(b.level * 100), charging: b.charging };
+  }).catch((e) => { extra.battery = "error: " + e.message; }));
+  if ($("opt-geo").checked) jobs.push(new Promise((res) => {
+    if (!navigator.geolocation) { extra.geolocation = "not supported"; return res(); }
+    navigator.geolocation.getCurrentPosition((p) => {
+      extra.geolocation = { latitude: p.coords.latitude, longitude: p.coords.longitude,
+        accuracy_m: p.coords.accuracy, altitude_m: p.coords.altitude, altitude_accuracy_m: p.coords.altitudeAccuracy,
+        heading_deg: p.coords.heading, speed_mps: p.coords.speed, fix_time_utc: new Date(p.timestamp).toISOString(),
+        source: "browser Geolocation API (GPS, Wi-Fi or IP based — decided by the OS/browser)" };
+      res();
+    }, (e) => { extra.geolocation = "error " + e.code + ": " + e.message; res(); },
+    { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+  }));
+  if ($("opt-ip").checked) jobs.push(fetch("https://api.ipify.org?format=json", { cache: "no-store" })
+    .then((r) => r.json()).then((j) => { extra.public_ip = j.ip; })
+    .catch((e) => { extra.public_ip = "error: " + e.message; }));
+  if (!jobs.length) return;
+  await Promise.all(jobs);
+  appendLog(Object.assign({ type: "supplement", for_seq: seq }, nowStamp(), { examiner: examiner(), data: extra }));
+}
+function onOpen(entry, how) {
+  const rec = Object.assign({ type: "open", how }, nowStamp(), {
+    examiner: examiner(),
+    entry: { n: entry.n, id: entry.id, url: entry.url, title: entry.title, visit_time_utc: entry.time_utc },
+    environment: environmentNow(),
+  });
+  appendLog(rec).then((full) => supplement(full.seq));
+}
+function notesFor(n) { return LOG.filter((r) => r.type === "note" && r.entry && r.entry.n === n); }
+function opensFor(n) { return LOG.filter((r) => r.type === "open" && r.entry && r.entry.n === n); }
+
+// ---------------------------------------------------------------- header
+const ctx = DATA.context || {};
+$("hdr-sub").textContent = "Generated " + fmtLocal(ctx.export_time_utc || DATA.generated_utc) +
+  " on " + (ctx.hostname || "?") + " by OS user " + (ctx.os_user || "?") +
+  (ctx.os_user_full_name ? " (" + ctx.os_user_full_name + ")" : "") + " · chromehisto " + DATA.tool.version;
+const times = E.map((e) => e.time_utc).filter(Boolean).sort();
+const hosts = new Set(E.map((e) => e.url_parts.host));
+for (const [k, v] of [["Visits/records", E.length.toLocaleString()], ["Domains", hosts.size.toLocaleString()],
+  ["Downloads", DATA.downloads.length.toLocaleString()], ["Sources", DATA.sources.length],
+  ["Earliest", times.length ? fmtLocal(times[0]) : "—"], ["Latest", times.length ? fmtLocal(times[times.length - 1]) : "—"],
+  ["Data SHA-256", DATA_SHA.slice(0, 16) + "…"]]) {
+  $("hdr-chips").append(el("span", { class: "chip" }, k + ": ", el("b", { text: v })));
+}
+
+// ---------------------------------------------------------------- tabs
+document.querySelectorAll("nav.tabs button").forEach((b) => b.addEventListener("click", () => {
+  document.querySelectorAll("nav.tabs button").forEach((x) => x.setAttribute("aria-selected", String(x === b)));
+  document.querySelectorAll("main > section").forEach((s) => { s.hidden = s.id !== "tab-" + b.dataset.tab; });
+  if (b.dataset.tab === "log") renderLog();
+}));
+
+// ---------------------------------------------------------------- history
+const HAY = E.map((e) => (e.title + " " + e.url + " " + JSON.stringify(e.groups)).toLowerCase());
+function fillSelect(sel, values, label) {
+  sel.append(el("option", { value: "", text: "All " + label }));
+  for (const [v, n] of values) sel.append(el("option", { value: v, text: v + " (" + n + ")" }));
+}
+function counts(fn) {
+  const m = new Map(); for (const e of E) { const k = fn(e); if (k !== "" && k != null) m.set(k, (m.get(k) || 0) + 1); }
+  return [...m.entries()].sort((a, b) => b[1] - a[1]);
+}
+$("src").append(el("option", { value: "", text: "All sources" }));
+DATA.sources.forEach((s, i) => $("src").append(el("option", { value: String(i), text: s.label })));
+fillSelect($("trans"), counts((e) => String(e.meta.transition || "")), "transitions");
+fillSelect($("origin"), counts((e) => String(e.meta.origin || "")), "origins");
+
+const prefs = load(PREF_KEY, {});
+if (prefs.examiner) $("examiner").value = prefs.examiner;
+$("examiner").addEventListener("change", () => { prefs.examiner = $("examiner").value; store(PREF_KEY, prefs); });
+
+let filtered = [], page = 0;
+function applyFilter() {
+  const q = $("q").value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const from = $("from").value ? new Date($("from").value + "T00:00:00").getTime() : -Infinity;
+  const to = $("to").value ? new Date($("to").value + "T23:59:59.999").getTime() : Infinity;
+  const src = $("src").value, tr = $("trans").value, og = $("origin").value;
+  filtered = [];
+  for (let i = 0; i < E.length; i++) {
+    const e = E[i];
+    if (src !== "" && String(e.src) !== src) continue;
+    if (tr && String(e.meta.transition) !== tr) continue;
+    if (og && String(e.meta.origin) !== og) continue;
+    if (from !== -Infinity || to !== Infinity) {
+      const t = e.time_utc ? Date.parse(e.time_utc) : NaN;
+      if (isNaN(t) || t < from || t > to) continue;
+    }
+    if (q.length && !q.every((w) => HAY[i].includes(w))) continue;
+    filtered.push(e);
+  }
+  const s = $("sort").value;
+  if (s === "asc") filtered.reverse();
+  else if (s === "host") filtered.sort((a, b) => a.url_parts.host.localeCompare(b.url_parts.host) || (b.time_utc || "").localeCompare(a.time_utc || ""));
+  else if (s === "visits") filtered.sort((a, b) => (b.meta.visit_count || 0) - (a.meta.visit_count || 0));
+  page = 0; render();
+}
+let timer;
+["q"].forEach((id) => $(id).addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(applyFilter, 180); }));
+["from", "to", "src", "trans", "origin", "sort"].forEach((id) => $(id).addEventListener("change", applyFilter));
+$("per").addEventListener("change", () => { page = 0; render(); });
+$("opt-raw").addEventListener("change", render);
+
+function link(entry, text, cls) {
+  const href = safeHref(entry.url);
+  if (!href) return el("span", { class: cls + " dead", title: "Not a web link — cannot be opened from a page; use Copy", text });
+  const a = el("a", { class: cls, href, target: "_blank", rel: "noopener noreferrer", text });
+  a.addEventListener("click", () => onOpen(entry, "click"));
+  a.addEventListener("auxclick", (ev) => { if (ev.button === 1) onOpen(entry, "middle-click"); });
+  return a;
+}
+function card(e) {
+  const m = e.meta, badges = [];
+  if (m.transition) badges.push(el("span", { class: "badge" + (m.transition === "TYPED" ? " typed" : ""), text: m.transition }));
+  if (m.origin) badges.push(el("span", { class: "badge" + (m.origin === "SYNCED" ? " sync" : ""), text: m.origin }));
+  if (m.http_status != null) badges.push(el("span", { class: "badge", text: "HTTP " + m.http_status }));
+  const when = el("div", { class: "when" },
+    el("span", { text: fmtLocal(e.time_utc) }),
+    el("span", { class: "mono", text: e.time_utc ? e.time_utc.replace("+00:00", "Z") + " UTC" : "no timestamp" }),
+    badges,
+    m.duration_s != null ? el("span", { text: "on page " + m.duration_s + " s" }) : null,
+    m.visit_count != null ? el("span", { text: "URL visits " + m.visit_count + (m.typed_count ? " · typed " + m.typed_count : "") }) : null,
+    el("span", { text: e.url_parts.host }));
+  const c = el("div", { class: "card" }, when,
+    el("div", { class: "title" }, link(e, e.title || "(no title)", "")),
+    link(e, e.url, "url"));
+  const opens = opensFor(e.n);
+  const detailBox = el("div");
+  const notesBox = el("div", { class: "notes" });
+  const actions = el("div", { class: "actions" },
+    el("button", { class: "btn", onclick: () => toggleDetails(e, detailBox) }, "Details"),
+    el("button", { class: "btn", onclick: () => copy(e.url) }, "Copy URL"),
+    el("button", { class: "btn", onclick: () => editNote(e, notesBox) }, "Add / edit note"),
+    opens.length ? el("span", { class: "opened", text: "Opened from this report " + opens.length + "× · last " + fmtLocal(opens[opens.length - 1].at_utc) }) : null);
+  c.append(actions, notesBox, detailBox);
+  renderNotes(e, notesBox);
+  if ($("opt-raw").checked) toggleDetails(e, detailBox);
+  return c;
+}
+function toggleDetails(e, box) {
+  if (box.firstChild) { box.replaceChildren(); return; }
+  const d = el("div", { class: "details" });
+  d.append(el("h3", { text: "Source" }), kvTable({ source: DATA.sources[e.src] ? DATA.sources[e.src].label : e.source, record_id: e.id }));
+  const up = e.url_parts;
+  d.append(el("h3", { text: "URL breakdown" }), kvTable({ full_url: e.url, scheme: up.scheme, host: up.host, port: up.port,
+    username_in_url: up.username, path: up.path, fragment: up.fragment }));
+  if (up.query_params.length) d.append(el("h3", { text: "Query parameters (" + up.query_params.length + ")" }), kvTable(up.query_params));
+  for (const [g, obj] of Object.entries(e.groups)) d.append(el("h3", { text: g }), kvTable(obj));
+  const opens = opensFor(e.n);
+  if (opens.length) {
+    d.append(el("h3", { text: "Opened from this report" }));
+    for (const o of opens) {
+      const sup = LOG.find((r) => r.type === "supplement" && r.for_seq === o.seq);
+      d.append(kvTable({ seq: o.seq, opened_at_utc: o.at_utc, opened_at_local: o.at_local, timezone: o.tz,
+        opened_by: o.examiner, how: o.how, environment: o.environment, supplemental: sup ? sup.data : "(none)", record_hash: o.hash }));
+    }
+  }
+  box.append(d);
+}
+function renderNotes(e, box) {
+  const notes = notesFor(e.n);
+  box.replaceChildren();
+  if (!notes.length) return;
+  const cur = notes[notes.length - 1];
+  const n = el("div", { class: "n" }, el("div", { text: cur.text || "(note cleared)" }),
+    el("div", { class: "hist", text: (notes.length > 1 ? "Edited" : "Written") + " by " + cur.examiner + " · " + fmtLocal(cur.at_utc) +
+      (notes.length > 1 ? " · first written by " + notes[0].examiner + " · " + fmtLocal(notes[0].at_utc) + " · " + notes.length + " versions" : "") }));
+  if (notes.length > 1) {
+    const hist = el("details", null, el("summary", { class: "hist", text: "Edit history" }));
+    for (const v of notes) hist.append(el("div", { class: "hist", text: "#" + v.seq + " " + v.at_utc + " " + v.examiner + ": " + (v.text || "(empty)") }));
+    n.append(hist);
+  }
+  box.append(n);
+}
+function editNote(e, box) {
+  const notes = notesFor(e.n);
+  const prev = notes.length ? notes[notes.length - 1].text : "";
+  const ta = el("textarea", null); ta.value = prev;
+  const form = el("div", { class: "n" }, ta, el("div", { class: "actions" },
+    el("button", { class: "btn primary", onclick: () => {
+      if (examiner() === "(not entered)" && !confirm("No examiner name entered. Save note anyway?")) return;
+      appendLog(Object.assign({ type: "note" }, nowStamp(), { examiner: examiner(),
+        entry: { n: e.n, id: e.id, url: e.url }, text: ta.value, previous_text: notes.length ? prev : null }))
+        .then(() => { renderNotes(e, box); toast("Note saved & hashed"); });
+    } }, "Save note"),
+    el("button", { class: "btn", onclick: () => renderNotes(e, box) }, "Cancel")));
+  box.replaceChildren(form); ta.focus();
+}
+function render() {
+  const per = Number($("per").value), pages = Math.max(1, Math.ceil(filtered.length / per));
+  page = Math.min(page, pages - 1);
+  const slice = filtered.slice(page * per, page * per + per);
+  $("count").textContent = filtered.length.toLocaleString() + " of " + E.length.toLocaleString() + " records" +
+    (filtered.length ? " · showing " + (page * per + 1) + "–" + (page * per + slice.length) : "");
+  $("list").replaceChildren(...slice.map(card));
+  const pg = $("pager"); pg.replaceChildren();
+  if (pages > 1) {
+    const go = (p) => { page = p; render(); window.scrollTo({ top: $("list").offsetTop - 80 }); };
+    pg.append(el("button", { class: "btn", disabled: page === 0, onclick: () => go(0) }, "« First"),
+      el("button", { class: "btn", disabled: page === 0, onclick: () => go(page - 1) }, "‹ Prev"),
+      el("span", { class: "sub", text: "Page " + (page + 1) + " / " + pages }),
+      el("button", { class: "btn", disabled: page >= pages - 1, onclick: () => go(page + 1) }, "Next ›"),
+      el("button", { class: "btn", disabled: page >= pages - 1, onclick: () => go(pages - 1) }, "Last »"));
+  }
+}
+$("export-csv").addEventListener("click", () => {
+  const cols = ["time_utc", "time_local", "title", "url", "host", "transition", "origin", "duration_s", "visit_count", "typed_count", "source", "record_id"];
+  const q = (v) => '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"';
+  const lines = [cols.join(",")].concat(filtered.map((e) => [e.time_utc, fmtLocal(e.time_utc), e.title, e.url, e.url_parts.host,
+    e.meta.transition, e.meta.origin, e.meta.duration_s, e.meta.visit_count, e.meta.typed_count,
+    DATA.sources[e.src] ? DATA.sources[e.src].label : e.source, e.id].map(q).join(",")));
+  download("chrome-history-filtered.csv", "﻿" + lines.join("\r\n"), "text/csv");
+});
+
+// ---------------------------------------------------------------- downloads
+function renderDownloads() {
+  const q = $("dq").value.trim().toLowerCase();
+  const rows = DATA.downloads.filter((d) => !q || JSON.stringify(d).toLowerCase().includes(q));
+  $("dcount").textContent = rows.length + " of " + DATA.downloads.length;
+  $("dlist").replaceChildren(...rows.slice(0, 1000).map((d) => {
+    const chain = (d.url_chain || []).map((u) => {
+      const h = safeHref(u);
+      return el("div", { class: "url" }, h ? el("a", { href: h, target: "_blank", rel: "noopener noreferrer", text: u }) : u);
+    });
+    const box = el("div");
+    return el("div", { class: "card" },
+      el("div", { class: "when" }, el("span", { text: fmtLocal(d.start_time_utc) }), el("span", { class: "badge", text: d.state_decoded || "" }),
+        el("span", { text: fmtBytes(d.received_bytes) + " / " + fmtBytes(d.total_bytes) }), el("span", { text: d.mime_type || "" })),
+      el("div", { class: "title", text: d.target_path || d.current_path || "(no path)" }), chain,
+      el("div", { class: "actions" }, el("button", { class: "btn", onclick: () => box.firstChild ? box.replaceChildren() : box.append(el("div", { class: "details" }, kvTable(d))) }, "All fields")), box);
+  }));
+}
+$("dq").addEventListener("input", renderDownloads);
+renderDownloads();
+
+// ---------------------------------------------------------------- evidence
+$("integrity").append(kvTable({
+  "embedded data SHA-256": DATA_SHA,
+  "how to verify the whole file": "compare the .sha256 file written next to this report (sha256sum / certutil -hashfile <file> SHA256)",
+  "click log storage key": LOG_KEY,
+}));
+$("verify-data").addEventListener("click", async () => {
+  $("verify-out").textContent = "hashing…";
+  const h = await sha256(RAW);
+  $("verify-out").replaceChildren(h === DATA_SHA ? el("span", { class: "ok", text: "✔ Data unchanged since export (" + h.slice(0, 16) + "…)" })
+    : el("span", { class: "bad", text: "✘ Data was modified after export (got " + h.slice(0, 16) + "…)" }));
+});
+$("ctx").append(kvTable(ctx));
+DATA.sources.forEach((s) => {
+  const p = el("div", { class: "panel", style: "margin-bottom:10px" }, el("h3", { style: "margin-top:0", text: s.kind + " — " + s.label }));
+  const copyS = Object.assign({}, s);
+  const gaps = copyS.visit_id_gaps; delete copyS.visit_id_gaps;
+  p.append(kvTable(copyS));
+  if (gaps) {
+    p.append(el("h3", { text: "Deleted / expired visit indicator" }),
+      kvTable({ first_visit_id: gaps.first_id, last_visit_id: gaps.last_id, missing_ids_total: gaps.missing_ids_total,
+        interpretation: gaps.interpretation,
+        ranges: gaps.ranges.map((r) => r[0] === r[1] ? String(r[0]) : r[0] + "–" + r[1]).concat(gaps.ranges_truncated ? ["…truncated"] : []) }));
+  }
+  $("sources").append(p);
+});
+
+// ---------------------------------------------------------------- log tab
+function onLogChanged() {
+  if (!$("tab-log").hidden) renderLog();
+  $("log-status").textContent = LOG.length + " records";
+}
+function renderLog() {
+  const t = $("log-table");
+  t.replaceChildren(el("tr", null, ["#", "Type", "Time (UTC)", "By", "Entry / detail", "Hash"].map((h) => el("th", { text: h }))));
+  for (const r of LOG.slice().reverse()) {
+    let detail;
+    if (r.type === "open") detail = (r.entry.title || "") + "\n" + r.entry.url;
+    else if (r.type === "note") detail = r.entry.url + "\n“" + r.text + "”" + (r.previous_text != null ? "  (was: “" + r.previous_text + "”)" : "");
+    else detail = "for #" + r.for_seq + ": " + JSON.stringify(r.data);
+    t.append(el("tr", null, el("td", { text: r.seq }), el("td", { text: r.type }), el("td", { class: "mono", text: r.at_utc }),
+      el("td", { text: r.examiner }), el("td", { style: "white-space:pre-wrap", text: detail }), el("td", { class: "mono", text: r.hash.slice(0, 12) + "…" })));
+  }
+  $("log-status").textContent = LOG.length + " records";
+}
+$("log-verify").addEventListener("click", async () => {
+  const res = await verifyChain();
+  $("log-status").replaceChildren(res.ok ? el("span", { class: "ok", text: "✔ Chain intact (" + res.n + " records)" })
+    : el("span", { class: "bad", text: "✘ Broken at record #" + res.at + ": " + res.why }));
+});
+$("log-export").addEventListener("click", async () => {
+  const res = await verifyChain();
+  const out = { report_data_sha256: DATA_SHA, exported_utc: new Date().toISOString(), exported_by: examiner(),
+    chain_verified: res, records: LOG };
+  download("chrome-history-click-log-" + new Date().toISOString().replace(/[:.]/g, "-") + ".json", JSON.stringify(out, null, 2), "application/json");
+});
+$("log-clear").addEventListener("click", () => {
+  if (!confirm("Delete all " + LOG.length + " log records from this browser? Export first if you need them.")) return;
+  LOG = []; store(LOG_KEY, LOG); renderLog(); applyFilter();
+});
+onLogChanged();
+
+// ---------------------------------------------------------------- about
+const about = $("about");
+about.append(
+  el("h2", { style: "margin-top:0", text: "Recorded by Chrome for every visit (shown in Details)" }),
+  el("ul", { class: "tight" }, [
+    "Exact URL and page title; visit timestamp to the microsecond (UTC and your local time)",
+    "How you got there — transition type (typed, link, reload, form submit, back/forward, address bar, redirect chain)",
+    "Referring visit and opener tab (which page led here), external referrer, search terms used",
+    "Time spent on the page (visit_duration) and foreground time; total and typed visit counts for the URL",
+    "Whether the visit happened on this device or arrived through Chrome Sync from another device (originator GUID)",
+    "Tab/window ids, page-end reason, HTTP response code, page language, password-field state, Journeys clusters (newer Chrome)",
+    "Takeout files: every field present in the JSON, with timestamps such as global_id decoded",
+  ].map((t) => el("li", { text: t }))),
+  el("h2", { text: "Not recorded by Chrome — cannot be recovered for past visits" }),
+  el("div", { class: "note" }, "Chrome never stores Wi-Fi signal strength, IP address, GPS position or the person's name with a history entry. ",
+    "No tool can reconstruct those values for visits that already happened; any tool claiming to do so would be inventing them. ",
+    "This report therefore documents them only where they can be measured truthfully:"),
+  el("ul", { class: "tight" }, [
+    "At export time (Evidence tab): OS user and full name, computer name, local IPs, the Wi-Fi link (SSID, BSSID, signal %, channel) and optionally the public IP.",
+    "Each time you open a link from this report (Click log): timestamp, timezone, examiner name, connection type/speed/RTT, battery, and — only if you enable it — geolocation and public IP.",
+    "Who made a visit: attributed to the Chrome profile / Google account and OS account that own the history file (Evidence tab). SYNCED visits came from another device on that account.",
+    "Edits: Chrome history rows are not edited, but deletions leave gaps in visit ids (Evidence tab). Notes you add here are stamped with name + time, and every change is kept in the hash chain.",
+    "Wi-Fi RSSI is not available to web pages in any browser; the click log records the browser's connection estimate instead.",
+  ].map((t) => el("li", { text: t }))));
+
+applyFilter();
+})();
+</script>
+</body>
+</html>
