@@ -8,6 +8,20 @@ Exports Chrome browsing history into **one self-contained HTML file**:
 
 Runs on Windows, macOS and Linux. It needs only Python 3.8 or newer, with no packages to install.
 
+## Android app (APK)
+
+**Download:** https://github.com/CoolCupMan/chromehisto/releases/download/android-latest/chromehisto.apk
+
+Install it by opening the APK on your phone and allowing installs from that source. GitHub Actions builds the APK from `android/` on every push (`.github/workflows/android.yml`).
+
+- **Import** a Google Takeout ZIP or JSON (`Verlauf.json`, `BrowserHistory.json`) or a Chrome `History` database file. You can also share a file to the app, or open it with the app, from your file manager.
+- **Rooted phones** can read Chrome's own database directly (`/data/data/com.android.chrome/...`). Android does not let any other app read Chrome's history without root, so on an unrooted phone use Takeout.
+- The app builds the same report as the desktop tool. Links open instantly in Chrome.
+- When the report is exported, and every time you open a link from it, the app records real **Wi-Fi RSSI (dBm)**, SSID/BSSID, frequency and link speed. It also records the cell signal, IP addresses, the **GPS fix** (with accuracy and fix time), battery state and device identity. These values are hash-chained into the click log.
+- Reports can be saved or shared from the menu.
+
+The APK is signed with the Android debug key unless you add these repository secrets: `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`. When they are set, the workflow signs the APK with your own key instead.
+
 ## Usage
 
 ```bash

@@ -1,0 +1,84 @@
+name: Android APK
+
+on:
+  push:
+    paths:
+      - "android/**"
+      - "chromehisto/**"
+      - "tests/**"
+      - ".github/workflows/android.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python tests (shared report template)
+        run: python3 -m unittest discover -s tests -v
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Optional release signing key from repository secrets
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PW: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PW: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            {
+              echo "SIGNING_KEYSTORE_PATH=$RUNNER_TEMP/release.keystore"
+              echo "SIGNING_STORE_PASSWORD=$STORE_PW"
+              echo "SIGNING_KEY_ALIAS=$KEY_ALIAS"
+              echo "SIGNING_KEY_PASSWORD=$KEY_PW"
+            } >> "$GITHUB_ENV"
+            echo "Signing with release key from secrets"
+          else
+            echo "No signing secrets set: APK is signed with the Android debug key"
+          fi
+
+      - name: Build APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Collect APK
+        run: |
+          cp android/app/build/outputs/apk/release/app-release.apk chromehisto.apk
+          sha256sum chromehisto.apk > chromehisto.apk.sha256
+          cat chromehisto.apk.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chromehisto-apk
+          path: |
+            chromehisto.apk
+            chromehisto.apk.sha256
+
+      - name: Publish to the "android-latest" release
+        if: github.ref_name == github.event.repository.default_branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete android-latest --yes --cleanup-tag || true
+          gh release create android-latest chromehisto.apk chromehisto.apk.sha256 \
+            --target "$GITHUB_SHA" \
+            --title "Chrome History Export – Android (latest build)" \
+            --notes "Built automatically from ${GITHUB_SHA::7} (run #${GITHUB_RUN_NUMBER}).
+
+          Download **chromehisto.apk**, open it on your phone and allow installing from this source.
+          SHA-256: \`$(cut -d' ' -f1 chromehisto.apk.sha256)\`"

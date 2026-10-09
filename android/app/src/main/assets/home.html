@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chrome History Export</title>
+<style>
+:root { --bg:#f6f7f9; --panel:#fff; --ink:#1b1f24; --muted:#5d6673; --line:#dde1e6; --accent:#1a5fd0;
+  --accent-ink:#fff; --warn-bg:#fff4dd; --warn:#9a5b00; --bad:#b3261e; --ok:#1d7a3e; }
+@media (prefers-color-scheme: dark) { :root { --bg:#111418; --panel:#1a1e24; --ink:#e6e9ee; --muted:#9aa4b2;
+  --line:#2c323b; --accent:#4c8dff; --accent-ink:#0b0d10; --warn-bg:#2d2416; --warn:#f0b34a; --bad:#ff7b72; --ok:#5bc785; } }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.45 system-ui, sans-serif; }
+main { max-width:720px; margin:0 auto; padding:16px; }
+h1 { font-size:21px; margin:4px 0 4px; }
+h2 { font-size:16px; margin:22px 0 8px; }
+.sub { color:var(--muted); font-size:13px; }
+.panel { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px; margin:10px 0; }
+button { font:inherit; border-radius:10px; border:1px solid var(--line); background:var(--panel); color:var(--ink);
+  padding:10px 14px; cursor:pointer; }
+button.primary { background:var(--accent); color:var(--accent-ink); border-color:var(--accent); width:100%; font-weight:600; padding:14px; }
+button.small { padding:6px 10px; font-size:13px; }
+.stack { display:flex; flex-direction:column; gap:8px; }
+.row { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+#status { min-height:20px; font-size:14px; margin-top:8px; }
+#status.err { color:var(--bad); font-weight:600; }
+.note { background:var(--warn-bg); border-left:3px solid var(--warn); padding:10px 12px; border-radius:8px; font-size:13.5px; }
+ol { padding-left:20px; margin:6px 0; } li { margin:4px 0; }
+.kv { display:grid; grid-template-columns: 40% 60%; gap:4px 8px; font-size:13px; }
+.kv div:nth-child(odd) { color:var(--muted); }
+.kv div { overflow-wrap:anywhere; }
+.rep b { overflow-wrap:anywhere; }
+.ok { color:var(--ok); } .bad { color:var(--bad); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Chrome History Export</h1>
+  <div class="sub">Clickable, forensic HTML reports of Chrome history: every link opens instantly, with every piece of metadata Chrome stored.</div>
+
+  <div class="panel stack">
+    <button class="primary" id="pick">Import Google Takeout (ZIP / JSON) or History file</button>
+    <button id="root">Read this phone's Chrome directly (rooted phones only)</button>
+    <div id="status" class="sub"></div>
+  </div>
+
+  <h2>Reports</h2>
+  <div id="reports"><div class="sub">No reports yet.</div></div>
+
+  <h2>Live measurement (recorded on export and on every link you open)</h2>
+  <div class="panel">
+    <div id="perm" class="sub"></div>
+    <div class="kv" id="live" style="margin-top:8px"></div>
+    <div class="row"><button class="small" id="refresh">Refresh</button>
+      <button class="small" id="grant">Permissions…</button></div>
+  </div>
+
+  <h2>How to get your history onto the phone</h2>
+  <div class="panel">
+    <div class="note">Android keeps Chrome's history inside Chrome's private storage, so no app can read it
+      without root. Google Takeout gives you the same history as a file:</div>
+    <ol>
+      <li>Open <b>takeout.google.com</b>, click <b>Deselect all</b>, tick <b>Chrome</b> (all Chrome data, including <b>Verlauf / History</b>).</li>
+      <li>Create the export, then download the ZIP when Google e-mails you.</li>
+      <li>Tap <b>Import</b> above and pick the ZIP, or <b>Share / Open with</b> this app from your file manager.</li>
+    </ol>
+    <div class="sub">A <code>History</code> database file copied from a computer
+      (<code>%LOCALAPPDATA%\Google\Chrome\User Data\Default\History</code>) also works and contains the most metadata.</div>
+  </div>
+
+  <h2>What can and cannot be recorded</h2>
+  <div class="panel sub">
+    Chrome stores no Wi-Fi strength, IP address, GPS position or person's name with a visit, so those can
+    never be recovered for past visits. This app measures them truthfully <b>now</b>: when a report is created, and
+    each time you open a link from a report (Wi-Fi RSSI in dBm, SSID/BSSID, link speed, cell signal, IP addresses,
+    GPS position with accuracy and fix time, battery). Each record is hash-chained so later changes are detectable.
+  </div>
+</main>
+<script>
+"use strict";
+const N = window.AndroidNative;
+const $ = (id) => document.getElementById(id);
+function el(tag, cls, text) { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
+function setStatus(msg, err) { $("status").textContent = msg; $("status").className = err ? "err" : "sub"; }
+
+window.onNative = function (kind, data) {
+  if (kind === "status") setStatus(data);
+  else if (kind === "error") setStatus("Error: " + data, true);
+  else if (kind === "permissions") { live(); }
+};
+
+$("pick").onclick = () => { setStatus("Choose one or more files…"); N.pick(); };
+$("root").onclick = () => { setStatus("Starting…"); N.readRoot(); };
+$("refresh").onclick = live;
+$("grant").onclick = () => N.requestPermissions();
+
+function fmtBytes(n) { const u = ["B","KB","MB","GB"]; let i = 0; while (n >= 1024 && i < 3) { n /= 1024; i++; } return n.toFixed(i ? 1 : 0) + " " + u[i]; }
+
+function reports() {
+  const list = JSON.parse(N.listReports());
+  const box = $("reports"); box.replaceChildren();
+  if (!list.length) { box.append(el("div", "sub", "No reports yet.")); return; }
+  for (const r of list) {
+    const p = el("div", "panel rep");
+    p.append(el("b", null, r.file), el("div", "sub",
+      r.records + " records · " + r.downloads + " downloads · " + fmtBytes(r.size_bytes) + " · " + new Date(r.created_utc).toLocaleString()),
+      el("div", "sub", "Sources: " + (r.sources || []).join(", ")),
+      el("div", "sub", "SHA-256 " + r.file_sha256.slice(0, 24) + "…"));
+    const row = el("div", "row");
+    const open = el("button", "small", "Open"); open.onclick = () => N.openReport(r.file);
+    const save = el("button", "small", "Save as…"); save.onclick = () => N.saveReport(r.file);
+    const share = el("button", "small", "Share"); share.onclick = () => N.shareReport(r.file);
+    const del = el("button", "small", "Delete"); del.onclick = () => { if (confirm("Delete " + r.file + "?")) { N.deleteReport(r.file); reports(); } };
+    row.append(open, save, share, del); p.append(row); box.append(p);
+  }
+}
+
+function live() {
+  const perm = JSON.parse(N.permissions());
+  $("perm").replaceChildren(
+    el("span", perm.location ? "ok" : "bad", perm.location ? "✔ Location permission" : "✘ Location not allowed (needed for GPS and Wi-Fi name)"),
+    document.createTextNode("  ·  "),
+    el("span", perm.phone ? "ok" : "bad", perm.phone ? "✔ Phone state" : "✘ Phone state (cell network type)"));
+  const s = JSON.parse(N.snapshot());
+  const w = typeof s.wifi === "object" ? s.wifi : {};
+  const loc = typeof s.location === "object" ? s.location : null;
+  const cell = typeof s.cellular === "object" ? s.cellular : {};
+  const rows = [
+    ["Time", new Date(s.captured_at_utc).toLocaleString() + " (" + s.timezone + ")"],
+    ["Device", s.device && s.device.manufacturer ? s.device.manufacturer + " " + s.device.model + " · Android " + s.device.android_version : String(s.device)],
+    ["Wi-Fi", w.connected ? (w.ssid + " · " + w.rssi_dbm + " dBm (level " + w.signal_level_0_4 + "/4) · " + w.frequency_mhz + " MHz · " + w.link_speed_mbps + " Mbps") : (w.wifi_enabled === false ? "off" : "not connected")],
+    ["Wi-Fi BSSID", w.bssid || "—"],
+    ["Mobile network", (cell.network_operator || "—") + (cell.signal_level_0_4 != null ? " · level " + cell.signal_level_0_4 + "/4" : "")],
+    ["IP addresses", Array.isArray(s.ip_addresses) ? s.ip_addresses.join("\n") : String(s.ip_addresses)],
+    ["Location", loc ? loc.latitude.toFixed(6) + ", " + loc.longitude.toFixed(6) + " ±" + Math.round(loc.accuracy_m) + " m (" + loc.provider + ", fix " + Math.round(loc.fix_age_seconds) + " s old)" : String(s.location)],
+    ["Battery", s.battery && s.battery.level_percent != null ? s.battery.level_percent + "% · charging: " + s.battery.charging : "—"],
+  ];
+  const kv = $("live"); kv.replaceChildren();
+  for (const [k, v] of rows) { kv.append(el("div", null, k)); const d = el("div", null, v); d.style.whiteSpace = "pre-wrap"; kv.append(d); }
+}
+
+if (N) { reports(); live(); setInterval(live, 10000); }
+else setStatus("Open this page inside the Chrome History Export app.", true);
+document.addEventListener("visibilitychange", () => { if (!document.hidden && N) { reports(); live(); } });
+</script>
+</body>
+</html>

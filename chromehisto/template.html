@@ -232,6 +232,7 @@ function toast(msg) {
 function store(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); return true; } catch (_) { return false; } }
 function load(key, dflt) { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : dflt; } catch (_) { return dflt; } }
 function download(name, text, type) {
+  if (window.AndroidNative && AndroidNative.saveFile) { AndroidNative.saveFile(name, text, type); return; }
   const a = el("a", { href: URL.createObjectURL(new Blob([text], { type })), download: name });
   document.body.append(a); a.click(); a.remove();
 }
@@ -348,6 +349,11 @@ function environmentNow() {
     page: location.href.split("#")[0],
   };
 }
+// Inside the Android app: real Wi-Fi RSSI/SSID/BSSID, cell signal, IPs, GPS fix and battery.
+function nativeNow() {
+  try { return window.AndroidNative ? JSON.parse(AndroidNative.snapshot()) : null; }
+  catch (e) { return "error: " + e.message; }
+}
 async function supplement(seq) {
   const extra = {};
   const jobs = [];
@@ -378,6 +384,8 @@ function onOpen(entry, how) {
     entry: { n: entry.n, id: entry.id, url: entry.url, title: entry.title, visit_time_utc: entry.time_utc },
     environment: environmentNow(),
   });
+  const nat = nativeNow();
+  if (nat) rec.device_measurement = nat;
   appendLog(rec).then((full) => supplement(full.seq));
 }
 function notesFor(n) { return LOG.filter((r) => r.type === "note" && r.entry && r.entry.n === n); }
@@ -505,7 +513,7 @@ function toggleDetails(e, box) {
     for (const o of opens) {
       const sup = LOG.find((r) => r.type === "supplement" && r.for_seq === o.seq);
       d.append(kvTable({ seq: o.seq, opened_at_utc: o.at_utc, opened_at_local: o.at_local, timezone: o.tz,
-        opened_by: o.examiner, how: o.how, environment: o.environment, supplemental: sup ? sup.data : "(none)", record_hash: o.hash }));
+        opened_by: o.examiner, how: o.how, environment: o.environment, device_measurement: o.device_measurement || "(desktop browser — not available)", supplemental: sup ? sup.data : "(none)", record_hash: o.hash }));
     }
   }
   box.append(d);
@@ -670,7 +678,7 @@ about.append(
     "Each time you open a link from this report (Click log): timestamp, timezone, examiner name, connection type/speed/RTT, battery, and — only if you enable it — geolocation and public IP.",
     "Who made a visit: attributed to the Chrome profile / Google account and OS account that own the history file (Evidence tab). SYNCED visits came from another device on that account.",
     "Edits: Chrome history rows are not edited, but deletions leave gaps in visit ids (Evidence tab). Notes you add here are stamped with name + time, and every change is kept in the hash chain.",
-    "Wi-Fi RSSI is not available to web pages in any browser; the click log records the browser's connection estimate instead.",
+    "Wi-Fi RSSI is not available to web pages in desktop browsers; there the click log records the browser's connection estimate. The Android app records the real Wi-Fi RSSI (dBm), SSID/BSSID, cell signal, IP addresses and GPS fix natively.",
   ].map((t) => el("li", { text: t }))));
 
 applyFilter();
