@@ -36,6 +36,7 @@ ol { padding-left:20px; margin:6px 0; } li { margin:4px 0; }
 <body>
 <main>
   <h1>Chrome History Export</h1>
+  <div class="sub" id="appid"></div>
   <div class="sub">Clickable, forensic HTML reports of Chrome history: every link opens instantly, with every piece of metadata Chrome stored.</div>
 
   <div class="panel stack">
@@ -140,6 +141,7 @@ function live() {
   for (const [k, v] of rows) { kv.append(el("div", null, k)); const d = el("div", null, v); d.style.whiteSpace = "pre-wrap"; kv.append(d); }
 }
 
+if (N && N.appInfo) { const a = JSON.parse(N.appInfo()); $("appid").textContent = "Build " + a.version + " · app id " + a.id; }
 if (N) { reports(); live(); setInterval(live, 10000); }
 else setStatus("Open this page inside the Chrome History Export app.", true);
 document.addEventListener("visibilitychange", () => { if (!document.hidden && N) { reports(); live(); } });

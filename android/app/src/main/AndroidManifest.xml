@@ -40,7 +40,7 @@
 
         <provider
             android:name=".ReportProvider"
-            android:authorities="com.chromehisto.app.reports"
+            android:authorities="${applicationId}.reports"
             android:exported="false"
             android:grantUriPermissions="true" />
     </application>

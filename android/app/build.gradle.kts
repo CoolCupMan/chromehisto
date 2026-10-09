@@ -18,12 +18,21 @@ android {
     namespace = "com.chromehisto.app"
     compileSdk = 35
 
+    buildFeatures {
+        resValues = true
+    }
+
     defaultConfig {
-        applicationId = "com.chromehisto.app"
+        // Every CI build gets its own application id (com.chromehisto.app.b<run>) and
+        // launcher name, so new builds install side by side with older ones instead of
+        // replacing them (and never clash over differing signing keys).
+        val build = System.getenv("GITHUB_RUN_NUMBER") ?: "0"
+        applicationId = "com.chromehisto.app.b$build"
         minSdk = 26
         targetSdk = 35
-        versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
-        versionName = "1.0." + (System.getenv("GITHUB_RUN_NUMBER") ?: "0")
+        versionCode = build.toInt().coerceAtLeast(1)
+        versionName = "1.0.$build"
+        resValue("string", "app_name", "Chrome History #$build")
     }
 
     signingConfigs {

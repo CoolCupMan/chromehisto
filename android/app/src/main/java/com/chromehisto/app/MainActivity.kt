@@ -210,7 +210,7 @@ class MainActivity : Activity() {
     }
 
     private fun shareReport(name: String) {
-        val uri = ReportProvider.uriFor(File(name).name)
+        val uri = ReportProvider.uriFor(this, File(name).name)
         val send = Intent(Intent.ACTION_SEND).setType("text/html")
             .putExtra(Intent.EXTRA_STREAM, uri)
             .putExtra(Intent.EXTRA_SUBJECT, "Chrome history report")
@@ -260,6 +260,11 @@ class MainActivity : Activity() {
         @JavascriptInterface fun readRoot() = runOnUiThread {
             runImport { it.importRoot() }
         }
+
+        @JavascriptInterface fun appInfo(): String = JSONObject()
+            .put("id", packageName)
+            .put("version", try { packageManager.getPackageInfo(packageName, 0).versionName } catch (e: Exception) { "?" })
+            .toString()
 
         @JavascriptInterface fun listReports(): String = ReportBuilder.list(this@MainActivity).toString()
 

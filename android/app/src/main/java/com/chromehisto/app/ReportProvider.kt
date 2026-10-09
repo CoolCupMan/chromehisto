@@ -2,6 +2,7 @@ package com.chromehisto.app
 
 import android.content.ContentProvider
 import android.content.ContentValues
+import android.content.Context
 import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
@@ -14,8 +15,9 @@ import java.io.FileNotFoundException
 class ReportProvider : ContentProvider() {
 
     companion object {
-        const val AUTHORITY = "com.chromehisto.app.reports"
-        fun uriFor(name: String): Uri = Uri.parse("content://$AUTHORITY/${Uri.encode(name)}")
+        /** Authority is "<applicationId>.reports" so parallel installs do not clash. */
+        fun uriFor(ctx: Context, name: String): Uri =
+            Uri.parse("content://${ctx.packageName}.reports/${Uri.encode(name)}")
     }
 
     private fun fileFor(uri: Uri): File {
