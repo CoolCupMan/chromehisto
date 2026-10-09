@@ -48,6 +48,14 @@ VISIT_SOURCES = {
 }
 BROWSER_TYPES = {0: "UNKNOWN", 1: "TABBED", 2: "POPUP", 3: "CUSTOM_TAB",
                  4: "AUTH_TAB"}
+ATTRIBUTION_NOTE_DB = (
+    "Chrome stores no per-visit user name. A visit is attributable to the owner of "
+    "this profile (see Profile identity); SYNCED visits came from another device on "
+    "the same account.")
+ATTRIBUTION_NOTE_TAKEOUT = (
+    "Takeout history is tied to the Google account that requested the export. Records "
+    "with a client_id/session tag identify the originating Chrome installation, not a "
+    "person's name.")
 DOWNLOAD_STATES = {0: "IN_PROGRESS", 1: "COMPLETE", 2: "CANCELLED",
                    3: "INTERRUPTED (legacy)", 4: "INTERRUPTED"}
 
@@ -438,12 +446,7 @@ def _read_con(con, path, facts, label, profile_dir):
         if "content_annotations" in extra:
             groups["Page content (content_annotations)"] = extra["content_annotations"]
 
-        groups["Attribution"] = {
-            "recorded_by_profile": label or "",
-            "note": "Chrome stores no per-visit user name. The visit is attributable "
-                    "to the owner of this profile (see Report → Profile identity); "
-                    "SYNCED visits came from another device on the same account.",
-        }
+        groups["Attribution"] = {"recorded_by_profile": label or ""}
 
         entries.append(_entry(
             id=vid, url=d.get("u_url") or "", title=d.get("u_title") or "",
@@ -462,6 +465,7 @@ def _read_con(con, path, facts, label, profile_dir):
         "kind": "Chrome History SQLite database",
         "label": label or path,
         "evidence_file": facts,
+        "attribution_note": ATTRIBUTION_NOTE_DB,
         "row_counts": {t: con.execute("SELECT COUNT(*) FROM %s" % t).fetchone()[0]
                        for t in ("urls", "visits", "downloads", "keyword_search_terms")
                        if _has_table(con, t)},
@@ -588,12 +592,7 @@ def read_takeout_json(data, label, facts):
         groups["Takeout record"] = rec
         for cpath, sc in ctx.items():
             groups["Container: " + cpath] = {k: _annotate(v) for k, v in sc.items()}
-        groups["Attribution"] = {
-            "recorded_by": label,
-            "note": "Takeout history is tied to the Google account that requested "
-                    "the export. Records with a client_id/session tag identify the "
-                    "originating Chrome installation, not a person's name.",
-        }
+        groups["Attribution"] = {"recorded_by": label}
         title = node.get("title") or ""
         transition = node.get("page_transition")
         if isinstance(transition, int):
@@ -610,7 +609,8 @@ def read_takeout_json(data, label, facts):
     top_keys = list(data.keys()) if isinstance(data, dict) else ["(array)"]
     return {"info": {"kind": "Google Takeout JSON", "label": label,
                      "evidence_file": facts, "top_level_keys": top_keys,
-                     "records_with_url": len(entries)},
+                     "records_with_url": len(entries),
+                     "attribution_note": ATTRIBUTION_NOTE_TAKEOUT},
             "entries": entries, "downloads": []}
 
 

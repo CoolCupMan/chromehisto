@@ -401,7 +401,8 @@ const hosts = new Set(E.map((e) => e.url_parts.host));
 for (const [k, v] of [["Visits/records", E.length.toLocaleString()], ["Domains", hosts.size.toLocaleString()],
   ["Downloads", DATA.downloads.length.toLocaleString()], ["Sources", DATA.sources.length],
   ["Earliest", times.length ? fmtLocal(times[0]) : "—"], ["Latest", times.length ? fmtLocal(times[times.length - 1]) : "—"],
-  ["Data SHA-256", DATA_SHA.slice(0, 16) + "…"]]) {
+  ["Data SHA-256", DATA_SHA.slice(0, 16) + "…"]].concat(DATA.part && DATA.part.count > 1 ?
+  [["Part", DATA.part.index + " of " + DATA.part.count + " (" + DATA.part.total_records.toLocaleString() + " records in total)"]] : [])) {
   $("hdr-chips").append(el("span", { class: "chip" }, k + ": ", el("b", { text: v })));
 }
 

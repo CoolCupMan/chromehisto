@@ -121,7 +121,7 @@ class MainActivity : Activity() {
                 @Suppress("DEPRECATION") (intent.getParcelableExtra(Intent.EXTRA_STREAM) as? Uri)
             else -> null
         }
-        if (uri != null) runImport { Importer(this, ::status).importUris(listOf(uri)) }
+        if (uri != null) runImport { it.importUris(listOf(uri)) }
     }
 
     override fun onResume() {
@@ -178,19 +178,25 @@ class MainActivity : Activity() {
 
     private fun status(msg: String) = js("window.onNative && onNative('status', ${JSONObject.quote(msg)})")
 
-    private fun runImport(job: () -> List<JSONObject>) {
+    private fun runImport(job: (Importer) -> Unit) {
         if (!web.url.orEmpty().endsWith("/home.html")) web.loadUrl(HOME)
         thread(name = "import") {
+            val store = EntryStore(cacheDir)
             try {
-                val sources = job()
+                val importer = Importer(this, store, ::status)
+                job(importer)
+                if (importer.results.isEmpty()) throw IllegalStateException("No history records found.")
                 status("Measuring device, Wi-Fi and location for the export record …")
                 val ctx = ReportBuilder.exportContext(this, native)
                 val name = "chrome-history-" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
-                status("Writing report …")
-                val f = ReportBuilder.build(this, sources, ctx, name)
-                runOnUiThread { web.loadUrl("https://$HOST/reports/${f.name}") }
+                status("Writing report (${store.size} records) …")
+                val files = ReportBuilder.build(this, importer.results, store, ctx, name)
+                if (files.size > 1) status("Done: ${store.size} records in ${files.size} report parts")
+                runOnUiThread { web.loadUrl("https://$HOST/reports/${files.first().name}") }
             } catch (e: Throwable) {
                 js("window.onNative && onNative('error', ${JSONObject.quote(e.message ?: e.toString())})")
+            } finally {
+                store.close()
             }
         }
     }
@@ -221,7 +227,7 @@ class MainActivity : Activity() {
                 val uris = ArrayList<Uri>()
                 data.clipData?.let { cd -> for (i in 0 until cd.itemCount) uris.add(cd.getItemAt(i).uri) }
                 if (uris.isEmpty()) data.data?.let { uris.add(it) }
-                if (uris.isNotEmpty()) runImport { Importer(this, ::status).importUris(uris) }
+                if (uris.isNotEmpty()) runImport { it.importUris(uris) }
             }
             REQ_SAVE -> {
                 val dst = data.data ?: return
@@ -252,7 +258,7 @@ class MainActivity : Activity() {
         }
 
         @JavascriptInterface fun readRoot() = runOnUiThread {
-            runImport { Importer(this@MainActivity, this@MainActivity::status).importRoot() }
+            runImport { it.importRoot() }
         }
 
         @JavascriptInterface fun listReports(): String = ReportBuilder.list(this@MainActivity).toString()

@@ -4,18 +4,29 @@ import android.content.Context
 import android.os.Build
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.BufferedOutputStream
 import java.io.File
+import java.io.FileOutputStream
+import java.io.OutputStream
+import java.security.MessageDigest
 import java.time.Instant
 import java.time.ZonedDateTime
 
-/** Port of chromehisto/report.py: fills the shared template with the payload. */
+/**
+ * Port of chromehisto/report.py that streams: records are written one at a time
+ * from the [EntryStore], so report size is not limited by the app's heap. Large
+ * histories are split into parts that a phone's WebView can open comfortably.
+ */
 object ReportBuilder {
+
+    /** Records per report file. */
+    const val PART_SIZE = 15000
 
     fun reportsDir(ctx: Context): File = File(ctx.filesDir, "reports").apply { mkdirs() }
 
-    private fun embed(payload: JSONObject): String =
-        // org.json already escapes "/" as "\/", so "</script>" cannot appear.
-        payload.toString()
+    /** Escapes a JSON fragment for embedding inside <script type="application/json">. */
+    private fun escape(s: String): String =
+        s.replace("</", "<\\/")
             .replace("<!--", "<\\u0021--")
             .replace(" ", "\\u2028")
             .replace(" ", "\\u2029")
@@ -36,56 +47,106 @@ object ReportBuilder {
             .put("device_network_location_at_export", snap)
     }
 
-    /** Builds the report, returns the written HTML file. */
-    fun build(ctx: Context, sources: List<JSONObject>, context: JSONObject, baseName: String): File {
-        val all = ArrayList<JSONObject>()
-        val downloads = JSONArray()
-        val infos = JSONArray()
-        sources.forEachIndexed { si, src ->
-            infos.put(src.getJSONObject("info"))
-            val es = src.getJSONArray("entries")
-            for (i in 0 until es.length()) all.add(es.getJSONObject(i).put("src", si))
-            val ds = src.optJSONArray("downloads") ?: JSONArray()
-            for (i in 0 until ds.length()) downloads.put(ds.getJSONObject(i).put("_src", si))
-        }
-        all.sortByDescending { it.opt("time_utc") as? String ?: "" }
-        all.forEachIndexed { n, e -> e.put("n", n) }
-
+    fun build(ctx: Context, sources: List<SourceResult>, store: EntryStore, context: JSONObject,
+              baseName: String): List<File> {
         val version = try {
             ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName ?: "?"
         } catch (e: Exception) { "?" }
-        val payload = JSONObject()
-            .put("tool", JSONObject().put("name", "chromehisto-android").put("version", version))
-            .put("generated_utc", HistorySources.iso(Instant.now()))
-            .put("context", context)
-            .put("sources", infos)
-            .put("entries", JSONArray(all))
-            .put("downloads", downloads)
-        val data = embed(payload)
-        val dataHash = HistorySources.sha256(data.toByteArray(Charsets.UTF_8))
         val template = ctx.assets.open("template.html").bufferedReader(Charsets.UTF_8).use { it.readText() }
-        val html = template.replace("__DATA_SHA256__", dataHash).replace("__DATA_JSON__", data)
+        return write(reportsDir(ctx), template, version, sources, store, context, baseName)
+    }
 
-        val out = File(reportsDir(ctx), "$baseName.html")
-        out.writeText(html, Charsets.UTF_8)
-        val fileHash = HistorySources.sha256(html.toByteArray(Charsets.UTF_8))
-        File(reportsDir(ctx), "$baseName.html.sha256").writeText("$fileHash  ${out.name}\n")
-        File(reportsDir(ctx), "$baseName.meta.json").writeText(JSONObject()
-            .put("file", out.name)
-            .put("records", all.size)
-            .put("downloads", downloads.length())
-            .put("sources", JSONArray((0 until infos.length()).map { infos.getJSONObject(it).optString("label") }))
-            .put("created_utc", HistorySources.iso(Instant.now()))
-            .put("data_sha256", dataHash)
-            .put("file_sha256", fileHash)
-            .toString())
-        return out
+    private class HashingOut(val out: OutputStream) {
+        val md: MessageDigest = MessageDigest.getInstance("SHA-256")
+        fun write(s: String) = write(s.toByteArray(Charsets.UTF_8))
+        fun write(b: ByteArray, n: Int = b.size) { md.update(b, 0, n); out.write(b, 0, n) }
+        fun hex(): String = md.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    /** Context-free core, also used by the JVM tests. Returns the written HTML files. */
+    fun write(dir: File, template: String, version: String, sources: List<SourceResult>,
+              store: EntryStore, context: JSONObject, baseName: String,
+              partSize: Int = PART_SIZE): List<File> {
+        val cut = template.indexOf("__DATA_JSON__")
+        require(cut >= 0) { "template has no data placeholder" }
+        val head = template.substring(0, cut)
+        val tail = template.substring(cut + "__DATA_JSON__".length)
+
+        val order = store.newestFirst()
+        val parts = maxOf(1, (order.size + partSize - 1) / partSize)
+        val infos = JSONArray(sources.map { it.info })
+        val downloads = JSONArray()
+        sources.forEachIndexed { si, s ->
+            for (i in 0 until s.downloads.length()) downloads.put(s.downloads.getJSONObject(i).put("_src", si))
+        }
+        val generated = HistorySources.iso(Instant.now()) as String
+        val tool = JSONObject().put("name", "chromehisto-android").put("version", version)
+        val files = ArrayList<File>()
+
+        store.reader().use { rd ->
+            for (p in 0 until parts) {
+                val from = p * partSize
+                val to = minOf(order.size, from + partSize)
+                val name = if (parts == 1) baseName else "%s-part%02dof%02d".format(baseName, p + 1, parts)
+                val newest = if (to > from) store.time(order[from]) else ""
+                val oldest = if (to > from) store.time(order[to - 1]) else ""
+                val part = JSONObject().put("index", p + 1).put("count", parts)
+                    .put("records_in_part", to - from).put("total_records", order.size)
+                    .put("newest_utc", newest).put("oldest_utc", oldest)
+
+                // 1) data block, hashed while it is written
+                val tmp = File(dir, "$name.data.tmp")
+                val dataHash: String
+                BufferedOutputStream(FileOutputStream(tmp), 1 shl 16).use { os ->
+                    val h = HashingOut(os)
+                    h.write(escape("{\"tool\":$tool,\"generated_utc\":${JSONObject.quote(generated)}," +
+                        "\"context\":$context,\"sources\":$infos,\"part\":$part,\"entries\":["))
+                    for (j in from until to) {
+                        val i = order[j]
+                        val e = sources[store.source(i)].finish(rd.read(i))
+                        if (j > from) h.write(",")
+                        h.write(escape("{\"n\":${j - from}," + e.substring(1)))
+                    }
+                    h.write(escape("],\"downloads\":$downloads}"))
+                    dataHash = h.hex()
+                }
+
+                // 2) final HTML = head (with hash) + data + tail
+                val out = File(dir, "$name.html")
+                val fileHash: String
+                BufferedOutputStream(FileOutputStream(out), 1 shl 16).use { os ->
+                    val h = HashingOut(os)
+                    h.write(head.replace("__DATA_SHA256__", dataHash))
+                    tmp.inputStream().use { ins ->
+                        val buf = ByteArray(1 shl 16)
+                        while (true) { val n = ins.read(buf); if (n < 0) break; h.write(buf, n) }
+                    }
+                    h.write(tail)
+                    fileHash = h.hex()
+                }
+                tmp.delete()
+                File(dir, "$name.html.sha256").writeText("$fileHash  ${out.name}\n")
+                File(dir, "$name.meta.json").writeText(JSONObject()
+                    .put("file", out.name)
+                    .put("records", to - from)
+                    .put("part", p + 1).put("parts", parts)
+                    .put("newest_utc", newest).put("oldest_utc", oldest)
+                    .put("downloads", downloads.length())
+                    .put("sources", JSONArray((0 until infos.length()).map { infos.getJSONObject(it).optString("label") }))
+                    .put("created_utc", generated)
+                    .put("data_sha256", dataHash)
+                    .put("file_sha256", fileHash)
+                    .toString())
+                files.add(out)
+            }
+        }
+        return files
     }
 
     fun list(ctx: Context): JSONArray {
         val arr = JSONArray()
         reportsDir(ctx).listFiles { f -> f.name.endsWith(".meta.json") }
-            ?.sortedByDescending { it.lastModified() }
+            ?.sortedWith(compareByDescending<File> { it.lastModified() / 60000 }.thenBy { it.name })
             ?.forEach { f ->
                 try {
                     val m = JSONObject(f.readText())

@@ -2,11 +2,13 @@ package com.chromehisto.app
 
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
+import android.util.JsonReader
+import android.util.JsonToken
 import android.net.Uri
 import org.json.JSONArray
 import org.json.JSONObject
-import org.json.JSONTokener
 import java.io.File
+import java.io.Reader
 import java.net.URLDecoder
 import java.security.MessageDigest
 import java.time.Instant
@@ -164,36 +166,45 @@ object HistorySources {
 
     private fun Any?.asLong(): Long? = (this as? Number)?.toLong()
 
+    const val ATTRIBUTION_NOTE_DB = "Chrome stores no per-visit user name. A visit is attributable " +
+        "to the owner of this profile (see Profile identity); SYNCED visits came from another " +
+        "device on the same account."
+
     /**
-     * Read a Chrome History database. [copy] must be a private, writable copy
-     * of the evidence file; the original is never opened by SQLite.
+     * Read a Chrome History database into [store]. [copy] must be a private,
+     * writable copy of the evidence file; the original is never opened by SQLite.
+     * Rows are streamed, so databases of any size fit in memory.
      */
-    fun readHistoryDb(copy: File, label: String, facts: JSONObject,
-                      identity: JSONObject?): JSONObject {
+    fun readHistoryDb(copy: File, label: String, facts: JSONObject, identity: JSONObject?,
+                      store: EntryStore, src: Int): SourceResult {
         val db = SQLiteDatabase.openDatabase(copy.path, null, SQLiteDatabase.OPEN_READWRITE)
         try {
-            return readDb(db, label, facts, identity)
+            return readDb(db, label, facts, identity, store, src)
         } finally {
             db.close()
         }
     }
 
-    private fun readDb(db: SQLiteDatabase, label: String, facts: JSONObject,
-                       identity: JSONObject?): JSONObject {
+    private fun readDb(db: SQLiteDatabase, label: String, facts: JSONObject, identity: JSONObject?,
+                       store: EntryStore, src: Int): SourceResult {
         val vcols = columns(db, "visits")
         val ucols = columns(db, "urls")
-        val sel = (vcols.map { "v.$it AS v_$it" } + ucols.map { "u.$it AS u_$it" }).joinToString(", ")
-        val visits = rows(db, "SELECT $sel FROM visits v LEFT JOIN urls u ON u.id = v.url ORDER BY v.visit_time DESC")
-
-        val perVisit = HashMap<Long, HashMap<String, LinkedHashMap<String, Any>>>()
-        for ((table, key) in listOf("context_annotations" to "visit_id",
-                "content_annotations" to "visit_id", "visit_source" to "id")) {
+        val sel = ArrayList<String>()
+        sel += vcols.map { "v.$it AS v_$it" }
+        sel += ucols.map { "u.$it AS u_$it" }
+        var from = "visits v LEFT JOIN urls u ON u.id = v.url"
+        // Optional per-visit tables, joined generically so new Chrome columns show up.
+        val extras = LinkedHashMap<String, List<String>>()   // alias -> columns
+        for ((alias, table, key) in listOf(Triple("ca", "context_annotations", "visit_id"),
+                Triple("cn", "content_annotations", "visit_id"), Triple("vs", "visit_source", "id"))) {
             if (!hasTable(db, table)) continue
-            for (r in rows(db, "SELECT * FROM $table")) {
-                val vid = r.remove(key).asLong() ?: continue
-                perVisit.getOrPut(vid) { HashMap() }[table] = r
-            }
+            val cols = columns(db, table).filter { it != key }
+            from += " LEFT JOIN $table $alias ON $alias.$key = v.id"
+            sel += cols.map { "$alias.$it AS ${alias}_$it" }
+            sel += "$alias.$key AS ${alias}__row"
+            extras[alias] = cols
         }
+
         val searches = HashMap<Long, MutableList<String>>()
         if (hasTable(db, "keyword_search_terms")) {
             for (r in rows(db, "SELECT url_id, term FROM keyword_search_terms")) {
@@ -214,107 +225,26 @@ object HistorySources {
             }
         }
         val urlByVisit = HashMap<Long, String>()
-        for (r in visits) r["v_id"].asLong()?.let { urlByVisit[it] = r["u_url"] as? String ?: "" }
+        db.rawQuery("SELECT v.id, u.url FROM visits v LEFT JOIN urls u ON u.id = v.url", null).use { c ->
+            while (c.moveToNext()) urlByVisit[c.getLong(0)] = if (c.isNull(1)) "" else c.getString(1)
+        }
 
-        val entries = JSONArray()
-        for (d in visits) {
-            val vid = d["v_id"].asLong() ?: continue
-            val whenI = webkit(d["v_visit_time"].asLong())
-            val groups = JSONObject()
-
-            val visit = JSONObject()
-            visit.put("visit_id", vid)
-            visit.put("visit_time_raw (WebKit µs)", d["v_visit_time"])
-            visit.put("visit_time_utc", iso(whenI))
-            var durationS: Any = JSONObject.NULL
-            d["v_visit_duration"].asLong()?.let {
-                visit.put("visit_duration_raw (µs)", it)
-                durationS = Math.round(it / 1000.0) / 1000.0
-                visit.put("visit_duration_seconds", durationS)
+        db.rawQuery("SELECT ${sel.joinToString(", ")} FROM $from", null).use { c ->
+            val names = Array(c.columnCount) { c.getColumnName(it) }
+            val d = HashMap<String, Any>()
+            while (c.moveToNext()) {
+                d.clear()
+                for (i in names.indices) d[names[i]] = cursorValue(c, i)
+                val e = dbEntry(d, vcols, ucols, extras, label, urlByVisit, searches, clusters) ?: continue
+                store.add(src, e.opt("time_utc") as? String, e.put("src", src).toString())
             }
-            var tr: Transition? = null
-            d["v_transition"].asLong()?.let {
-                tr = decodeTransition(it)
-                visit.put("transition_raw", tr!!.raw)
-                visit.put("transition_core", tr!!.core)
-                visit.put("transition_qualifiers", tr!!.qualifiers.joinToString(", ").ifEmpty { "—" })
-            }
-            for (c in vcols) {
-                if (c in setOf("id", "url", "visit_time", "visit_duration", "transition")) continue
-                visit.put(c, d["v_$c"])
-            }
-            groups.put("Visit (visits table)", visit)
-
-            val nav = JSONObject()
-            d["v_from_visit"].asLong()?.takeIf { it != 0L }?.let {
-                nav.put("referring_visit_id (from_visit)", it)
-                nav.put("referring_url", urlByVisit[it] ?: "(visit not in DB — expired or deleted)")
-            }
-            d["v_opener_visit"].asLong()?.takeIf { it != 0L }?.let {
-                nav.put("opener_visit_id", it)
-                nav.put("opener_url", urlByVisit[it] ?: "(visit not in DB — expired or deleted)")
-            }
-            (d["v_external_referrer_url"] as? String)?.takeIf { it.isNotEmpty() }?.let {
-                nav.put("external_referrer_url", it)
-            }
-            val uid = d["u_id"].asLong()
-            searches[uid]?.let { nav.put("search_terms_for_this_url", JSONArray(it)) }
-            clusters[vid]?.let { nav.put("journeys_clusters", JSONArray(it)) }
-            if (nav.length() > 0) groups.put("Navigation chain", nav)
-
-            val urlg = JSONObject().put("url_id", uid ?: JSONObject.NULL)
-            for (c in ucols) {
-                if (c in setOf("id", "url", "title")) continue
-                urlg.put(c, d["u_$c"])
-                if (c == "last_visit_time") urlg.put("last_visit_time_utc", iso(webkit(d["u_$c"].asLong())))
-            }
-            groups.put("URL record (urls table)", urlg)
-
-            val extra = perVisit[vid] ?: HashMap()
-            val origin = JSONObject()
-            val vs = extra["visit_source"]
-            if (vs != null) {
-                val src = vs["source"].asLong()
-                origin.put("visit_source_raw", src ?: JSONObject.NULL)
-                origin.put("visit_source", VISIT_SOURCES[src] ?: "UNKNOWN($src)")
-            } else {
-                origin.put("visit_source", "BROWSED (no visit_source row; Chrome omits it for local visits)")
-            }
-            (d["v_originator_cache_guid"] as? String)?.takeIf { it.isNotEmpty() }?.let {
-                origin.put("originating_sync_device_guid", it)
-            }
-            groups.put("Origin of record", origin)
-            extra["context_annotations"]?.let { ca ->
-                val o = JSONObject(ca as Map<*, *>)
-                ca["browser_type"].asLong()?.let { o.put("browser_type_decoded", BROWSER_TYPES[it] ?: "?") }
-                for (k in listOf("duration_since_last_visit", "total_foreground_duration")) {
-                    ca[k].asLong()?.takeIf { it >= 0 }?.let { o.put("${k}_seconds", Math.round(it / 1000.0) / 1000.0) }
-                }
-                groups.put("Tab / window context (context_annotations)", o)
-            }
-            extra["content_annotations"]?.let {
-                groups.put("Page content (content_annotations)", JSONObject(it as Map<*, *>))
-            }
-            groups.put("Attribution", JSONObject()
-                .put("recorded_by_profile", label)
-                .put("note", "Chrome stores no per-visit user name. The visit is attributable " +
-                    "to the owner of this profile (see Report → Profile identity); " +
-                    "SYNCED visits came from another device on the same account."))
-
-            val meta = JSONObject()
-                .put("transition", tr?.core ?: "")
-                .put("duration_s", durationS)
-                .put("visit_count", d["u_visit_count"] ?: JSONObject.NULL)
-                .put("typed_count", d["u_typed_count"] ?: JSONObject.NULL)
-                .put("origin", origin.getString("visit_source").substringBefore(' '))
-            entries.put(entry(vid, d["u_url"] as? String ?: "", d["u_title"] as? String ?: "",
-                whenI, label, groups, meta))
         }
 
         val info = JSONObject()
             .put("kind", "Chrome History SQLite database")
             .put("label", label)
             .put("evidence_file", facts)
+            .put("attribution_note", ATTRIBUTION_NOTE_DB)
         val counts = JSONObject()
         for (t in listOf("urls", "visits", "downloads", "keyword_search_terms")) {
             if (hasTable(db, t)) counts.put(t, rows(db, "SELECT COUNT(*) AS n FROM $t")[0]["n"])
@@ -327,7 +257,101 @@ object HistorySources {
             info.put("db_meta_table", m)
         }
         if (identity != null) info.put("profile_identity", identity)
-        return JSONObject().put("info", info).put("entries", entries).put("downloads", downloads(db))
+        return SourceResult(info, downloads(db))
+    }
+
+    private fun dbEntry(d: Map<String, Any>, vcols: List<String>, ucols: List<String>,
+                        extras: Map<String, List<String>>, label: String,
+                        urlByVisit: Map<Long, String>, searches: Map<Long, List<String>>,
+                        clusters: Map<Long, List<String>>): JSONObject? {
+        val vid = d["v_id"].asLong() ?: return null
+        val whenI = webkit(d["v_visit_time"].asLong())
+        val groups = JSONObject()
+
+        val visit = JSONObject()
+        visit.put("visit_id", vid)
+        visit.put("visit_time_raw (WebKit µs)", d["v_visit_time"])
+        visit.put("visit_time_utc", iso(whenI))
+        var durationS: Any = JSONObject.NULL
+        d["v_visit_duration"].asLong()?.let {
+            visit.put("visit_duration_raw (µs)", it)
+            durationS = Math.round(it / 1000.0) / 1000.0
+            visit.put("visit_duration_seconds", durationS)
+        }
+        val tr = d["v_transition"].asLong()?.let { decodeTransition(it) }
+        if (tr != null) {
+            visit.put("transition_raw", tr.raw)
+            visit.put("transition_core", tr.core)
+            visit.put("transition_qualifiers", tr.qualifiers.joinToString(", ").ifEmpty { "—" })
+        }
+        for (c in vcols) {
+            if (c in setOf("id", "url", "visit_time", "visit_duration", "transition")) continue
+            visit.put(c, d["v_$c"])
+        }
+        groups.put("Visit (visits table)", visit)
+
+        val nav = JSONObject()
+        d["v_from_visit"].asLong()?.takeIf { it != 0L }?.let {
+            nav.put("referring_visit_id (from_visit)", it)
+            nav.put("referring_url", urlByVisit[it] ?: "(visit not in DB — expired or deleted)")
+        }
+        d["v_opener_visit"].asLong()?.takeIf { it != 0L }?.let {
+            nav.put("opener_visit_id", it)
+            nav.put("opener_url", urlByVisit[it] ?: "(visit not in DB — expired or deleted)")
+        }
+        (d["v_external_referrer_url"] as? String)?.takeIf { it.isNotEmpty() }?.let {
+            nav.put("external_referrer_url", it)
+        }
+        val uid = d["u_id"].asLong()
+        searches[uid]?.let { nav.put("search_terms_for_this_url", JSONArray(it)) }
+        clusters[vid]?.let { nav.put("journeys_clusters", JSONArray(it)) }
+        if (nav.length() > 0) groups.put("Navigation chain", nav)
+
+        val urlg = JSONObject().put("url_id", uid ?: JSONObject.NULL)
+        for (c in ucols) {
+            if (c in setOf("id", "url", "title")) continue
+            urlg.put(c, d["u_$c"])
+            if (c == "last_visit_time") urlg.put("last_visit_time_utc", iso(webkit(d["u_$c"].asLong())))
+        }
+        groups.put("URL record (urls table)", urlg)
+
+        fun extra(alias: String): JSONObject? {
+            val cols = extras[alias] ?: return null
+            if (d["${alias}__row"] == JSONObject.NULL) return null
+            val o = JSONObject()
+            for (c in cols) o.put(c, d["${alias}_$c"])
+            return o
+        }
+        val origin = JSONObject()
+        val vs = extra("vs")
+        if (vs != null) {
+            val s = vs.opt("source").asLong()
+            origin.put("visit_source_raw", s ?: JSONObject.NULL)
+            origin.put("visit_source", VISIT_SOURCES[s] ?: "UNKNOWN($s)")
+        } else {
+            origin.put("visit_source", "BROWSED (no visit_source row; Chrome omits it for local visits)")
+        }
+        (d["v_originator_cache_guid"] as? String)?.takeIf { it.isNotEmpty() }?.let {
+            origin.put("originating_sync_device_guid", it)
+        }
+        groups.put("Origin of record", origin)
+        extra("ca")?.let { ca ->
+            ca.opt("browser_type").asLong()?.let { ca.put("browser_type_decoded", BROWSER_TYPES[it] ?: "?") }
+            for (k in listOf("duration_since_last_visit", "total_foreground_duration")) {
+                ca.opt(k).asLong()?.takeIf { it >= 0 }?.let { ca.put("${k}_seconds", Math.round(it / 1000.0) / 1000.0) }
+            }
+            groups.put("Tab / window context (context_annotations)", ca)
+        }
+        extra("cn")?.let { groups.put("Page content (content_annotations)", it) }
+        groups.put("Attribution", JSONObject().put("recorded_by_profile", label))
+
+        val meta = JSONObject()
+            .put("transition", tr?.core ?: "")
+            .put("duration_s", durationS)
+            .put("visit_count", d["u_visit_count"] ?: JSONObject.NULL)
+            .put("typed_count", d["u_typed_count"] ?: JSONObject.NULL)
+            .put("origin", origin.getString("visit_source").substringBefore(' '))
+        return entry(vid, d["u_url"] as? String ?: "", d["u_title"] as? String ?: "", whenI, label, groups, meta)
     }
 
     private fun idGaps(db: SQLiteDatabase, limit: Int = 200): JSONObject {
@@ -423,27 +447,12 @@ object HistorySources {
         "time_usec" to ::unixUs, "timestamp_msec" to ::unixMs,
         "last_active_time_unix_epoch_millis" to ::unixMs, "timestamp" to ::unixMs)
 
-    private class Found(val node: JSONObject, val path: String, val ctx: LinkedHashMap<String, JSONObject>)
+    const val ATTRIBUTION_NOTE_TAKEOUT = "Takeout history is tied to the Google account that " +
+        "requested the export. Records with a client_id/session tag identify the originating " +
+        "Chrome installation, not a person's name."
 
     private fun urlOf(o: JSONObject): String? =
         URL_KEYS.firstNotNullOfOrNull { k -> (o.opt(k) as? String)?.takeIf { it.isNotEmpty() } }
-
-    private fun walk(node: Any?, path: String, ctx: LinkedHashMap<String, JSONObject>, out: MutableList<Found>) {
-        when (node) {
-            is JSONObject -> {
-                if (urlOf(node) != null) { out.add(Found(node, path, ctx)); return }
-                val sub = LinkedHashMap(ctx)
-                val sc = JSONObject()
-                for (k in node.keys()) {
-                    val v = node.get(k)
-                    if (v !is JSONObject && v !is JSONArray) sc.put(k, v)
-                }
-                if (sc.length() > 0) sub[path.ifEmpty { "$" }] = sc
-                for (k in node.keys()) walk(node.get(k), if (path.isEmpty()) k else "$path.$k", sub, out)
-            }
-            is JSONArray -> for (i in 0 until node.length()) walk(node.get(i), "$path[$i]", ctx, out)
-        }
-    }
 
     private fun annotate(v: Any?): Any? {
         val n = when (v) {
@@ -456,70 +465,170 @@ object HistorySources {
         return "$v   ⟶ ${iso(g.first)} (decoded as ${g.second} — heuristic)"
     }
 
-    fun readTakeoutJson(text: String, label: String, facts: JSONObject): JSONObject {
-        val data = JSONTokener(text.removePrefix("﻿")).nextValue()
-        val found = ArrayList<Found>()
-        walk(data, "", LinkedHashMap(), found)
-        val list = ArrayList<JSONObject>()
-        found.forEachIndexed { n, f ->
-            val node = f.node
-            val url = urlOf(node)!!
-            var whenI: Instant? = null
-            var rawKey: String? = null
-            for ((k, conv) in TIME_KEYS) {
-                val v = node.opt(k) ?: continue
-                val l = (v as? Number)?.toLong() ?: v.toString().toLongOrNull() ?: continue
-                whenI = conv(l); rawKey = k; break
-            }
-            val groups = JSONObject()
-            val rec = JSONObject().put("json_path", f.path)
-            for (k in node.keys()) {
-                val v = node.get(k)
-                rec.put(k, when {
-                    v is JSONObject || v is JSONArray -> v.toString()
-                    k == "url" || k == "title" -> v
-                    else -> annotate(v)
-                })
-            }
-            if (whenI != null) rec.put("(decoded) time_utc from $rawKey", iso(whenI))
-            val trRaw = node.opt("page_transition")
-            var trName: String = trRaw?.toString() ?: ""
-            if (trRaw is Number) {
-                val t = decodeTransition(trRaw.toLong())
-                rec.put("page_transition_decoded", t.core + " " + t.qualifiers.joinToString(","))
-                trName = t.core
-            }
-            groups.put("Takeout record", rec)
-            for ((cpath, sc) in f.ctx) {
-                val o = JSONObject()
-                for (k in sc.keys()) o.put(k, annotate(sc.get(k)))
-                groups.put("Container: $cpath", o)
-            }
-            groups.put("Attribution", JSONObject()
-                .put("recorded_by", label)
-                .put("note", "Takeout history is tied to the Google account that requested " +
-                    "the export. Records with a client_id/session tag identify the " +
-                    "originating Chrome installation, not a person's name."))
-            val meta = JSONObject()
-                .put("transition", trName)
-                .put("duration_s", JSONObject.NULL)
-                .put("visit_count", JSONObject.NULL)
-                .put("typed_count", JSONObject.NULL)
-                .put("origin", "TAKEOUT")
-                .put("http_status", node.opt("http_status_code") ?: JSONObject.NULL)
-            val id = node.opt("unique_id") ?: node.opt("id") ?: (n + 1)
-            list.add(entry(id, url, node.optString("title", ""), whenI, label, groups, meta))
+    private fun recordTime(node: JSONObject): Pair<Instant, String>? {
+        for ((k, conv) in TIME_KEYS) {
+            val v = node.opt(k) ?: continue
+            val l = (v as? Number)?.toLong() ?: v.toString().toLongOrNull() ?: continue
+            return conv(l) to k
         }
-        list.sortByDescending { it.opt("time_utc") as? String ?: "" }
-        val top = JSONArray()
-        if (data is JSONObject) data.keys().forEach { top.put(it) } else top.put("(array)")
-        val info = JSONObject()
-            .put("kind", "Google Takeout JSON")
-            .put("label", label)
-            .put("evidence_file", facts)
-            .put("top_level_keys", top)
-            .put("records_with_url", list.size)
-        return JSONObject().put("info", info).put("entries", JSONArray(list))
-            .put("downloads", JSONArray())
+        return null
+    }
+
+    /** Builds the report entry for one Takeout record (same layout as sources.py). */
+    fun takeoutEntry(node: JSONObject, path: String, ctx: List<Pair<String, JSONObject>>,
+                     n: Int, label: String): JSONObject {
+        val url = urlOf(node) ?: ""
+        val t = recordTime(node)
+        val groups = JSONObject()
+        val rec = JSONObject().put("json_path", path)
+        for (k in node.keys()) {
+            val v = node.get(k)
+            rec.put(k, when {
+                v is JSONObject || v is JSONArray -> v.toString()
+                k == "url" || k == "title" -> v
+                else -> annotate(v)
+            })
+        }
+        if (t != null) rec.put("(decoded) time_utc from ${t.second}", iso(t.first))
+        val trRaw = node.opt("page_transition")
+        var trName: String = trRaw?.toString() ?: ""
+        if (trRaw is Number) {
+            val d = decodeTransition(trRaw.toLong())
+            rec.put("page_transition_decoded", d.core + " " + d.qualifiers.joinToString(","))
+            trName = d.core
+        }
+        groups.put("Takeout record", rec)
+        for ((cpath, sc) in ctx) {
+            val o = JSONObject()
+            for (k in sc.keys()) o.put(k, annotate(sc.get(k)))
+            groups.put("Container: $cpath", o)
+        }
+        groups.put("Attribution", JSONObject().put("recorded_by", label))
+        val meta = JSONObject()
+            .put("transition", trName)
+            .put("duration_s", JSONObject.NULL)
+            .put("visit_count", JSONObject.NULL)
+            .put("typed_count", JSONObject.NULL)
+            .put("origin", "TAKEOUT")
+            .put("http_status", node.opt("http_status_code") ?: JSONObject.NULL)
+        val id = node.opt("unique_id") ?: node.opt("id") ?: (n + 1)
+        return entry(id, url, node.optString("title", ""), t?.first, label, groups, meta)
+    }
+
+    /**
+     * Streaming Takeout reader. Walks the JSON with [JsonReader] so files far
+     * larger than the app's heap can be imported; every object carrying a URL
+     * is written to the [EntryStore] as it is found, together with the ids of
+     * its enclosing containers. Container scalars (session tag, tab type ...)
+     * are only complete once the container closes, so they are attached in
+     * [result]'s finish step.
+     */
+    class TakeoutReader(private val label: String, private val src: Int, private val store: EntryStore) {
+        // Only containers that actually hold records are remembered, so memory
+        // stays proportional to the number of containers, not of records.
+        private var nextId = 0
+        private val containers = HashMap<Int, Pair<String, JSONObject>>()
+        private val topKeys = JSONArray()
+        var records = 0
+            private set
+
+        fun parse(input: Reader) {
+            val jr = JsonReader(input)
+            jr.isLenient = true
+            readValue(jr, "", IntArray(0), 0)
+        }
+
+        private fun readValue(jr: JsonReader, path: String, ctx: IntArray, depth: Int) {
+            when (jr.peek()) {
+                JsonToken.BEGIN_OBJECT -> readObject(jr, path, ctx, depth)
+                JsonToken.BEGIN_ARRAY -> {
+                    if (depth == 0) topKeys.put("(array)")
+                    jr.beginArray()
+                    var i = 0
+                    while (jr.hasNext()) readValue(jr, "$path[${i++}]", ctx, depth + 1)
+                    jr.endArray()
+                }
+                else -> jr.skipValue()
+            }
+        }
+
+        private fun readObject(jr: JsonReader, path: String, ctx: IntArray, depth: Int) {
+            val id = nextId++
+            val childCtx = ctx + id
+            val recordsBefore = records
+            val node = JSONObject()
+            val scalars = JSONObject()
+            val walked = ArrayList<String>()
+            var isRecord = false
+            jr.beginObject()
+            while (jr.hasNext()) {
+                val k = jr.nextName()
+                if (depth == 0) topKeys.put(k)
+                when (jr.peek()) {
+                    JsonToken.BEGIN_OBJECT, JsonToken.BEGIN_ARRAY ->
+                        if (isRecord) node.put(k, readTree(jr))
+                        else { readValue(jr, if (path.isEmpty()) k else "$path.$k", childCtx, depth + 1); walked.add(k) }
+                    else -> {
+                        val v = readScalar(jr)
+                        node.put(k, v); scalars.put(k, v)
+                        if (k in URL_KEYS && v is String && v.isNotEmpty()) isRecord = true
+                    }
+                }
+            }
+            jr.endObject()
+            if (scalars.length() > 0 && records > recordsBefore) containers[id] = path.ifEmpty { "$" } to scalars
+            if (isRecord) {
+                for (k in walked) node.put(k, "(nested value listed as separate records)")
+                val t = recordTime(node)
+                val raw = JSONObject().put("node", node).put("path", path)
+                    .put("ctx", JSONArray(ctx.toList())).put("i", records)
+                store.add(src, t?.let { iso(it.first) as String }, raw.toString())
+                records++
+            }
+        }
+
+        private fun readScalar(jr: JsonReader): Any = when (jr.peek()) {
+            JsonToken.STRING -> jr.nextString()
+            JsonToken.NUMBER -> jr.nextString().let { s -> s.toLongOrNull() ?: s.toDoubleOrNull() ?: s }
+            JsonToken.BOOLEAN -> jr.nextBoolean()
+            JsonToken.NULL -> { jr.nextNull(); JSONObject.NULL }
+            else -> { jr.skipValue(); JSONObject.NULL }
+        }
+
+        private fun readTree(jr: JsonReader): Any = when (jr.peek()) {
+            JsonToken.BEGIN_OBJECT -> {
+                val o = JSONObject()
+                jr.beginObject()
+                while (jr.hasNext()) { val k = jr.nextName(); o.put(k, readTree(jr)) }
+                jr.endObject(); o
+            }
+            JsonToken.BEGIN_ARRAY -> {
+                val a = JSONArray()
+                jr.beginArray()
+                while (jr.hasNext()) a.put(readTree(jr))
+                jr.endArray(); a
+            }
+            else -> readScalar(jr)
+        }
+
+        fun result(facts: JSONObject): SourceResult {
+            val info = JSONObject()
+                .put("kind", "Google Takeout JSON")
+                .put("label", label)
+                .put("evidence_file", facts)
+                .put("top_level_keys", topKeys)
+                .put("records_with_url", records)
+                .put("attribution_note", ATTRIBUTION_NOTE_TAKEOUT)
+            return SourceResult(info) { raw ->
+                val r = JSONObject(raw)
+                val ids = r.getJSONArray("ctx")
+                val ctx = (0 until ids.length()).mapNotNull { j ->
+                    val cid = ids.getInt(j)
+                    containers[cid]
+                }
+                takeoutEntry(r.getJSONObject("node"), r.getString("path"), ctx, r.getInt("i"), label)
+                    .put("src", src).toString()
+            }
+        }
     }
 }

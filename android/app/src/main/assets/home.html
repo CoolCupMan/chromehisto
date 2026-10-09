@@ -103,7 +103,8 @@ function reports() {
   for (const r of list) {
     const p = el("div", "panel rep");
     p.append(el("b", null, r.file), el("div", "sub",
-      r.records + " records · " + r.downloads + " downloads · " + fmtBytes(r.size_bytes) + " · " + new Date(r.created_utc).toLocaleString()),
+      (r.parts > 1 ? "Part " + r.part + " of " + r.parts + " · " : "") + r.records + " records · " + fmtBytes(r.size_bytes) + " · created " + new Date(r.created_utc).toLocaleString()),
+      el("div", "sub", r.newest_utc ? "Visits " + new Date(r.oldest_utc).toLocaleDateString() + " – " + new Date(r.newest_utc).toLocaleDateString() : ""),
       el("div", "sub", "Sources: " + (r.sources || []).join(", ")),
       el("div", "sub", "SHA-256 " + r.file_sha256.slice(0, 24) + "…"));
     const row = el("div", "row");
